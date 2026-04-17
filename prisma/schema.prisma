@@ -1,0 +1,205 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ============================================
+// Better-Auth Core Tables
+// ============================================
+
+model User {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  emailVerified   Boolean  @default(false)
+  name            String?
+  image           String?
+  setupCompleted  Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  sessions              Session[]
+  accounts              Account[]
+  topicEdits            UserTopicEdit[]
+  usageLogs             ApiUsageLog[]
+  summaries             Summary[]
+  apiKeys               UserApiKey[]
+  securityQuestions     UserSecurityQuestion[]
+}
+
+model Session {
+  id             String   @id @default(cuid())
+  userId         String
+  token          String   @unique
+  expiresAt      DateTime
+  ipAddress      String?
+  userAgent      String?
+  setupCompleted Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String   @id @default(cuid())
+  userId                String
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  idToken               String?
+  password              String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
+
+// ============================================
+// Security Questions (Custom for Password Reset)
+// ============================================
+
+model SecurityQuestion {
+  id       String @id @default(cuid())
+  question String @unique
+
+  userAnswers UserSecurityQuestion[]
+}
+
+model UserSecurityQuestion {
+  id             String @id @default(cuid())
+  userId         String
+  questionId     String
+  answerHash     String
+  questionOrder  Int    // 1, 2, or 3 for ordering
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question SecurityQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, questionId])
+  @@unique([userId, questionOrder])
+  @@index([userId])
+}
+
+// ============================================
+// Application Tables
+// ============================================
+
+model Summary {
+  id            String   @id @default(cuid())
+  videoId       String
+  userId        String
+  title         String
+  content       String
+  transcript    String
+  hasTimestamps Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topics             Topic[]
+  topicEdits         UserTopicEdit[]
+  transcriptSegments TranscriptSegment[]
+
+  @@unique([videoId, userId])
+  @@index([userId])
+}
+
+model Topic {
+  id        String   @id @default(cuid())
+  summaryId String
+  title     String
+  startMs   Int
+  endMs     Int
+  order     Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  summary    Summary         @relation(fields: [summaryId], references: [id], onDelete: Cascade)
+  topicEdits UserTopicEdit[]
+}
+
+model UserTopicEdit {
+  id            String  @id @default(cuid())
+  userId        String
+  summaryId     String
+  topicId       String
+  customTitle   String?
+  customStartMs Int?
+  customEndMs   Int?
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  summary Summary @relation(fields: [summaryId], references: [id], onDelete: Cascade)
+  topic   Topic   @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, topicId])
+}
+
+model ApiUsageLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  service     String
+  endpoint    String
+  creditsUsed Float    @default(0)
+  tokensUsed  Int      @default(0)
+  timestamp   DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+model AppConfig {
+  id             String @id @default(cuid())
+  key            String @unique
+  encryptedValue String
+}
+
+model UserApiKey {
+  id             String   @id @default(cuid())
+  userId         String
+  service        String   // "supadata", "zai", "openrouter", "gemini", "groq", "openai"
+  encryptedValue String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, service])
+  @@index([userId])
+}
+
+model TranscriptSegment {
+  id        String   @id @default(cuid())
+  summaryId String
+  text      String
+  offset    Int      // Start time in milliseconds
+  duration  Int      // Duration in milliseconds
+  order     Int      // Display order
+  createdAt DateTime @default(now())
+
+  summary Summary @relation(fields: [summaryId], references: [id], onDelete: Cascade)
+
+  @@index([summaryId, order])
+}
