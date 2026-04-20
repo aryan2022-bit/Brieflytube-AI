@@ -51,13 +51,13 @@ export function Sidebar({ className }: SidebarProps) {
   }
 
   return (
-    <TooltipProvider delayDuration={100}>
+    <TooltipProvider delayDuration={300} disableHoverableContent>
       <motion.aside
         className={cn(
           "fixed left-0 top-0 h-screen z-50",
           "flex flex-col",
-          "bg-white/80 backdrop-blur-xl",
-          "border-r border-slate-200/60",
+          "bg-white/80 backdrop-blur-xl dark:bg-[hsl(228,20%,9%)]",
+          "border-r border-slate-200/60 dark:border-white/[0.08]",
           className
         )}
         initial={false}
@@ -71,13 +71,14 @@ export function Sidebar({ className }: SidebarProps) {
         {/* Logo */}
         <div className="h-16 flex items-center justify-center border-b border-slate-200/60">
           <Link href="/" className="flex items-center gap-3">
-            <div className="w-9 h-9 flex items-center justify-center">
+            <div className="w-9 h-9 flex items-center justify-center rounded-xl overflow-hidden bg-white shadow-sm border border-slate-100">
               <Image
                 src="/logo.png"
-                alt="YT Summarizer Logo"
+                alt="Brieflytube AI Logo"
                 width={36}
                 height={36}
                 className="w-full h-full object-contain"
+                priority
               />
             </div>
             <AnimatePresence>
@@ -88,7 +89,7 @@ export function Sidebar({ className }: SidebarProps) {
                   exit={{ opacity: 0, width: 0 }}
                   className="font-display font-semibold text-slate-900 whitespace-nowrap overflow-hidden"
                 >
-                  YT Summary
+                  Brieflytube AI
                 </motion.span>
               )}
             </AnimatePresence>
@@ -222,8 +223,8 @@ function NavItem({ icon: Icon, label, href, isActive, isExpanded }: NavItemProps
             "flex items-center gap-3 px-3 py-2.5 rounded-xl",
             "transition-all duration-200 relative",
             isActive
-              ? "bg-indigo-50 text-indigo-600"
-              : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
+              ? "bg-indigo-50 dark:bg-indigo-500/15 text-indigo-600 dark:text-indigo-400"
+              : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/[0.08]"
           )}
         >
           <Icon className="w-5 h-5 flex-shrink-0" />
@@ -302,17 +303,18 @@ export function MobileSidebar() {
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-slate-200/60">
           <Link href="/" className="flex items-center gap-3">
-            <div className="w-9 h-9 flex items-center justify-center">
+            <div className="w-9 h-9 flex items-center justify-center rounded-xl overflow-hidden bg-white shadow-sm border border-slate-100">
               <Image
                 src="/logo.png"
-                alt="YT Summarizer Logo"
+                alt="Brieflytube AI Logo"
                 width={36}
                 height={36}
                 className="w-full h-full object-contain"
+                priority
               />
             </div>
             <span className="font-display font-semibold text-slate-900">
-              YT Summary
+              Brieflytube AI
             </span>
           </Link>
         </div>

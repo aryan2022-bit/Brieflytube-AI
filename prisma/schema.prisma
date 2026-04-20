@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 // ============================================
@@ -112,6 +112,7 @@ model Summary {
   id            String   @id @default(cuid())
   videoId       String
   userId        String
+  language      String   @default("en")   // ISO 639-1 code, e.g. "en", "hi", "es"
   title         String
   content       String
   transcript    String
@@ -124,7 +125,7 @@ model Summary {
   topicEdits         UserTopicEdit[]
   transcriptSegments TranscriptSegment[]
 
-  @@unique([videoId, userId])
+  @@unique([videoId, userId, language])   // one summary per video/user/language combo
   @@index([userId])
 }
 

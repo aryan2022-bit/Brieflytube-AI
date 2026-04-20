@@ -1,25 +1,27 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-export async function GET() {
-  try {
-    // Check database connectivity by running a simple query
-    await prisma.$queryRaw`SELECT 1`;
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+};
 
-    return NextResponse.json({
-      status: "ok",
-      timestamp: new Date().toISOString(),
-    });
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS });
+}
+
+export async function GET(_req: NextRequest) {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return NextResponse.json(
+      { status: "ok", timestamp: new Date().toISOString() },
+      { headers: CORS }
+    );
   } catch (error) {
     console.error("Health check failed:", error);
-
     return NextResponse.json(
-      {
-        status: "error",
-        timestamp: new Date().toISOString(),
-        error: "Database unreachable",
-      },
-      { status: 503 }
+      { status: "error", timestamp: new Date().toISOString(), error: "Database unreachable" },
+      { status: 503, headers: CORS }
     );
   }
 }

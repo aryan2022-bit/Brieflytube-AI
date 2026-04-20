@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { use } from "react"
 import ReactMarkdown from "react-markdown"
@@ -16,6 +16,9 @@ import {
   Star,
   ExternalLink,
   BookOpen,
+  Copy,
+  Check,
+  Download,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ChapterTimeline } from "@/components/chapter-timeline"
@@ -68,6 +71,7 @@ export default function HistoryDetailPage({ params }: PageProps) {
   const [errorDismissed, setErrorDismissed] = useState(false)
   const [activeTab, setActiveTab] = useState<"chapters" | "transcript">("chapters")
   const [showFullSummary, setShowFullSummary] = useState(false)
+  const [copied, setCopied] = useState(false)
   const router = useRouter()
   const { id } = use(params)
 
@@ -85,15 +89,10 @@ export default function HistoryDetailPage({ params }: PageProps) {
         setError(null)
         setErrorDismissed(false)
 
-        const token = localStorage.getItem("token")
         const response = await fetch(`/api/history/${id}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          credentials: "include",
         })
-        if (!response.ok) {
-          throw new Error("Failed to fetch summary")
-        }
+        if (!response.ok) throw new Error("Failed to fetch summary")
         const data = await response.json()
         setSummary(data.summary)
       } catch (err) {
@@ -206,22 +205,44 @@ export default function HistoryDetailPage({ params }: PageProps) {
 
   const handleExport = (format: "pdf" | "word") => {
     if (!summary || !videoId) return
-
     if (format === "pdf") {
-      exportSummaryAsPdf(
-        { title: summary.title, content: summary.content },
-        displayTopics,
-        videoId
-      )
+      exportSummaryAsPdf({ title: summary.title, content: summary.content }, displayTopics, videoId)
       return
     }
-
-    exportSummaryAsWord(
-      { title: summary.title, content: summary.content },
-      displayTopics,
-      videoId
-    )
+    exportSummaryAsWord({ title: summary.title, content: summary.content }, displayTopics, videoId)
   }
+
+  const handleCopy = useCallback(async () => {
+    if (!summary?.content) return
+    const plain = summary.content
+      .replace(/^#{1,6}\s+/gm, "")
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .replace(/\*(.+?)\*/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/^[-*]\s+/gm, "• ")
+      .trim()
+    await navigator.clipboard.writeText(plain)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }, [summary?.content])
+
+  const handleDownloadTxt = useCallback(() => {
+    if (!summary?.content || !videoId) return
+    const plain = summary.content
+      .replace(/^#{1,6}\s+/gm, "")
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .replace(/\*(.+?)\*/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/^[-*]\s+/gm, "• ")
+      .trim()
+    const blob = new Blob([plain], { type: "text/plain;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `brieflytube-${videoId}-${summary.language ?? "en"}.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [summary?.content, videoId, summary?.language])
 
   // Loading state
   if (loading) {
@@ -255,7 +276,7 @@ export default function HistoryDetailPage({ params }: PageProps) {
               Back to History
             </Button>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {useStructuredView && (
                 <Button
                   variant="ghost"
@@ -267,6 +288,26 @@ export default function HistoryDetailPage({ params }: PageProps) {
                   {showFullSummary ? "Structured View" : "Full Text"}
                 </Button>
               )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleCopy}
+                disabled={!summary}
+                className="text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 rounded-full"
+              >
+                {copied ? <Check className="w-4 h-4 mr-2 text-green-500" /> : <Copy className="w-4 h-4 mr-2" />}
+                {copied ? "Copied!" : "Copy"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleDownloadTxt}
+                disabled={!summary}
+                className="text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 rounded-full"
+              >
+                <Download className="w-4 h-4 mr-2" />
+                .txt
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"

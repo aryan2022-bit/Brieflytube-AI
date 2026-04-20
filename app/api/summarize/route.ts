@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { extractVideoId } from "@/lib/youtube";
-import { fetchTranscript, TranscriptError } from "@/lib/transcript";
+import { spawn } from "child_process";
+import { YoutubeTranscript } from "youtube-transcript";
 import { chunkTranscript, type TranscriptChunk } from "@/lib/chunking";
 import {
   callWithFallback,
@@ -15,10 +16,38 @@ import { authenticateRequest } from "@/lib/apiAuth";
 import { checkRateLimit } from "@/lib/rateLimit";
 
 /**
+ * CORS helper — allows requests from Chrome extensions and localhost dev.
+ */
+function corsHeaders(req: NextRequest): Record<string, string> {
+  const origin = req.headers.get("origin") || "";
+  // Allow any chrome-extension:// origin (our own extension) + localhost
+  const allowed =
+    origin.startsWith("chrome-extension://") ||
+    origin.startsWith("http://localhost");
+  return {
+    "Access-Control-Allow-Origin": allowed ? origin : "null",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, Cookie",
+    "Access-Control-Allow-Credentials": "true",
+  };
+}
+
+/**
+ * OPTIONS handler — required for CORS preflight from the extension.
+ */
+export async function OPTIONS(req: NextRequest) {
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders(req),
+  });
+}
+
+/**
  * Progress event types for streaming responses
  */
 type ProgressEvent =
   | { type: "progress"; stage: Stage; message: string; detail?: string }
+  | { type: "stream_chunk"; chunk: string }
   | { type: "complete"; summary: SummaryResult; status: "completed" }
   | { type: "error"; error: string; details?: string };
 
@@ -58,33 +87,45 @@ interface SummaryResult {
  * GET handler - Returns available models for the user
  */
 export async function GET(req: NextRequest) {
-  // Authenticate request
   const auth = await authenticateRequest(req);
   if (!auth.success) {
-    return auth.response;
+    return new NextResponse(auth.response.body, {
+      status: auth.response.status,
+      headers: { ...Object.fromEntries(auth.response.headers), ...corsHeaders(req) },
+    });
   }
 
   try {
     const models = await getAvailableModels(auth.userId);
-    return NextResponse.json({ models });
+    return NextResponse.json({ models }, { headers: corsHeaders(req) });
   } catch {
     return NextResponse.json(
       { error: "Failed to get available models" },
-      { status: 500 }
+      { status: 500, headers: corsHeaders(req) }
     );
   }
 }
 
 /**
  * Supported output languages for summaries
+ * Matches the extension's lang-select dropdown exactly
  */
-type OutputLanguage = "de" | "en" | "fr" | "es" | "it";
+type OutputLanguage =
+  | "en" | "hi" | "es" | "fr" | "de"
+  | "pt" | "zh" | "ja" | "ko" | "ar" | "ru" | "it";
 
 const LANGUAGE_NAMES: Record<OutputLanguage, string> = {
-  de: "German",
   en: "English",
-  fr: "French",
+  hi: "Hindi",
   es: "Spanish",
+  fr: "French",
+  de: "German",
+  pt: "Portuguese",
+  zh: "Chinese (Simplified)",
+  ja: "Japanese",
+  ko: "Korean",
+  ar: "Arabic",
+  ru: "Russian",
   it: "Italian",
 };
 
@@ -97,7 +138,10 @@ export async function POST(req: NextRequest) {
   // Authenticate request first
   const auth = await authenticateRequest(req);
   if (!auth.success) {
-    return auth.response;
+    return new NextResponse(auth.response.body, {
+      status: auth.response.status,
+      headers: { ...Object.fromEntries(auth.response.headers), ...corsHeaders(req) },
+    });
   }
 
   // Rate limit by userId (authenticated users get their own limit)
@@ -115,6 +159,7 @@ export async function POST(req: NextRequest) {
         headers: {
           'Retry-After': String(Math.ceil((rateLimit.retryAfterMs || 60000) / 1000)),
           'X-RateLimit-Remaining': '0',
+          ...corsHeaders(req),
         }
       }
     );
@@ -162,25 +207,22 @@ export async function POST(req: NextRequest) {
         return;
       }
 
-      // Check cache first (per-user cache)
-      const existingSummary = await prisma.summary.findUnique({
-        where: {
-          videoId_userId: {
-            videoId,
-            userId,
-          },
-        },
+      // ── Language-aware cache lookup ────────────────────────────────────
+      // Query for an existing summary matching this exact video + user + language.
+      // Each combination is stored separately, so switching languages is a cache miss.
+      const langName = LANGUAGE_NAMES[language as OutputLanguage] ?? language;
+      console.log(`[Cache] Looking up videoId=${videoId} userId=${userId} language=${language}`);
+
+      const existingSummary = await prisma.summary.findFirst({
+        where: { videoId, userId, language },
         include: {
-          topics: {
-            orderBy: { order: "asc" },
-          },
-          transcriptSegments: {
-            orderBy: { order: "asc" },
-          },
+          topics:             { orderBy: { order: "asc" } },
+          transcriptSegments: { orderBy: { order: "asc" } },
         },
       });
 
       if (existingSummary) {
+        console.log(`[Cache HIT] videoId=${videoId} language=${language} – returning cached summary`);
         await writeProgress({
           type: "complete",
           summary: {
@@ -203,14 +245,17 @@ export async function POST(req: NextRequest) {
               duration: s.duration,
               order: s.order,
             })),
-            modelUsed: "glm-4.7-flash", // Default for cached results
+            modelUsed: "cached",
             source: "cache",
+            language,
           },
           status: "completed",
         });
         await writer.close();
         return;
       }
+
+      console.log(`[Cache MISS] videoId=${videoId} language=${language} – generating fresh summary`);
 
       // Stage 1: Fetch Transcript
       await writeProgress({
@@ -219,11 +264,170 @@ export async function POST(req: NextRequest) {
         message: "Fetching video transcript...",
       });
 
-      const transcriptResult = await fetchTranscript(url, userId);
-      const { content: transcriptContent, hasTimestamps } = transcriptResult;
+      let transcriptResult;
+      let hasTimestamps = true;
 
-      // Log Supadata usage
-      await logApiUsage(userId, "supadata", "transcript", hasTimestamps ? 1 : 2, 0);
+      try {
+        transcriptResult = await YoutubeTranscript.fetchTranscript(url);
+      } catch (error) {
+        console.error("Transcript fetch failed:", error);
+        console.log("TRIGGERED AUDIO FALLBACK WITH GROQ");
+        
+        await writeProgress({
+          type: "progress",
+          stage: "fetching_transcript",
+          message: "No subtitles found. Transcribing audio track directly...",
+        });
+
+        try {
+          // Edge Case 1: Pre-fetch metadata to completely reject Infinite Livestreams natively
+          const videoInfoStr = await new Promise<string>((resolve, reject) => {
+            const p = spawn("yt-dlp", ["--dump-json", url]);
+            let out = "";
+            p.stdout.on("data", (d) => (out += d));
+            p.on("close", (code) => (code === 0 ? resolve(out) : reject(new Error("Metadata dump failed"))));
+            p.on("error", reject);
+          });
+          
+          const videoInfo = JSON.parse(videoInfoStr);
+          if (videoInfo.is_live) {
+            throw new Error("Cannot summarize active livestreams.");
+          }
+
+          // Edge Case 2: Audio Chunking for strict 25MB Groq cap limits
+          const durationSeconds = videoInfo.duration || 0;
+          let fullTranscript = "";
+          
+          // Path to the ffmpeg internal binary we installed
+          const ffmpegPath = require("path").resolve(process.cwd(), "node_modules", "ffmpeg-static", "ffmpeg.exe");
+          const os = require("os");
+          const fs = require("fs");
+          const path = require("path");
+
+          await writeProgress({
+            type: "progress",
+            stage: "fetching_transcript",
+            message: "Downloading raw audio track...",
+          });
+
+          // Download entire audio track to temp file (super fast locally, avoids YouTube HTTP range throttling)
+          const fullAudioFile = path.join(os.tmpdir(), `full-audio-${Date.now()}.m4a`);
+          
+          await new Promise<void>((resolve, reject) => {
+            const ytProcess = spawn("yt-dlp", [
+              "--ffmpeg-location", ffmpegPath,
+              "-f", "bestaudio[ext=m4a]/bestaudio",
+              "--force-overwrites",
+              "-o", fullAudioFile,
+              url
+            ], { stdio: "ignore" });
+            
+            ytProcess.on("close", (c) => c === 0 ? resolve() : reject(new Error(`yt-dlp full download failed (Code ${c})`)));
+            ytProcess.on("error", reject);
+          });
+          
+          const fileSizeMB = fs.statSync(fullAudioFile).size / (1024 * 1024);
+          
+          if (fileSizeMB < 24) {
+            // Safe to send in one shot
+            const buffer = fs.readFileSync(fullAudioFile);
+            const file = new File([new Uint8Array(buffer)], "audio.m4a", { type: "audio/mp4" });
+            const formData = new FormData();
+            formData.append("file", file);
+            formData.append("model", "whisper-large-v3");
+
+            const groqRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+              method: "POST",
+              headers: { "Authorization": `Bearer ${process.env.GROQ_API_KEY}` },
+              body: formData
+            });
+
+            if (!groqRes.ok) throw new Error(`Groq API Error: ${await groqRes.text()}`);
+            const groqData = await groqRes.json();
+            fullTranscript = groqData.text;
+          } else {
+            // Slice locally using ffmpeg directly (disk-to-disk is instant and avoids HTTP timeouts)
+            const CHUNK_DURATION = 1200; // 20 min blocks
+            const chunksNeeded = Math.ceil(durationSeconds / CHUNK_DURATION) || 1;
+            
+            for (let i = 0; i < chunksNeeded; i++) {
+              const chunkFile = path.join(os.tmpdir(), `chunk-${Date.now()}-${i}.m4a`);
+              const startSec = i * CHUNK_DURATION;
+              
+              await writeProgress({
+                type: "progress",
+                stage: "fetching_transcript",
+                message: `Transcribing audio chunk ${i + 1} of ${chunksNeeded}...`,
+              });
+              
+              await new Promise<void>((resolve, reject) => {
+                const ffProcess = spawn(ffmpegPath, [
+                  "-i", fullAudioFile,
+                  "-ss", startSec.toString(),
+                  "-t", CHUNK_DURATION.toString(),
+                  "-c", "copy",
+                  chunkFile
+                ], { stdio: "ignore" });
+                ffProcess.on("close", (c) => c === 0 ? resolve() : reject(new Error(`ffmpeg slice failed (Code ${c})`)));
+                ffProcess.on("error", reject);
+              });
+              
+              const buffer = fs.readFileSync(chunkFile);
+              try { fs.unlinkSync(chunkFile); } catch(e){}
+              
+              const file = new File([new Uint8Array(buffer)], "audio.m4a", { type: "audio/mp4" });
+              const formData = new FormData();
+              formData.append("file", file);
+              formData.append("model", "whisper-large-v3");
+
+              const groqRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${process.env.GROQ_API_KEY}` },
+                body: formData
+              });
+
+              if (!groqRes.ok) throw new Error(`Groq Chunk API Error: ${await groqRes.text()}`);
+              const groqData = await groqRes.json();
+              fullTranscript += " " + groqData.text;
+            }
+          }
+          
+          // Final local cleanup
+          try { fs.unlinkSync(fullAudioFile); } catch(cleanupErr) {}
+
+          transcriptResult = fullTranscript.trim(); 
+          hasTimestamps = false;            
+          
+        } catch (fallbackError) {
+          const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+          console.error("Audio fallback failed:", fallbackMsg);
+          await writeProgress({
+            type: "error",
+            error: "No transcript available for this video",
+            details: `Audio transcription fallback also failed: ${fallbackMsg}`,
+          });
+          await writer.close();
+          return;
+        }
+      }
+
+      // Map over the array objects to match chunkTranscript expectations
+      const transcriptContent = transcriptResult;
+
+      // ── Guard: some videos return null/empty content ─────────────────
+      if (
+        transcriptContent == null ||
+        (Array.isArray(transcriptContent) && transcriptContent.length === 0) ||
+        (typeof transcriptContent === "string" && transcriptContent.trim().length === 0)
+      ) {
+        await writeProgress({
+          type: "error",
+          error: "No transcript available for this video",
+          details: "The video may be private, age-restricted, or have no captions/subtitles.",
+        });
+        await writer.close();
+        return;
+      }
 
       // Convert transcript content to string for storage and LLM processing
       const transcriptText = Array.isArray(transcriptContent)
@@ -244,7 +448,7 @@ export async function POST(req: NextRequest) {
         message: "Analyzing content structure...",
       });
 
-      const chunks = chunkTranscript(transcriptContent, hasTimestamps);
+      const chunks = chunkTranscript(transcriptContent as any, hasTimestamps);
 
       // Stage 3: Generate Summary
       await writeProgress({
@@ -259,7 +463,11 @@ export async function POST(req: NextRequest) {
         detailLevel,
         language as OutputLanguage,
         videoId,
-        userId
+        userId,
+        hasTimestamps,
+        async (textChunk) => {
+          await writeProgress({ type: "stream_chunk", chunk: textChunk });
+        }
       );
 
       // Log LLM usage
@@ -310,12 +518,40 @@ export async function POST(req: NextRequest) {
           }))
         : [];
 
-      // Save to database
-      const savedSummary = await prisma.summary.create({
-        data: {
+      // Save to database — upsert keyed on (videoId, userId, language) so each
+      // language gets its own row and switching languages never overwrites another.
+      console.log(`[Cache MISS] Saving summary — videoId=${videoId} language=${language}`);
+      const savedSummary = await prisma.summary.upsert({
+        where: {
+          videoId_userId_language: { videoId, userId, language },
+        },
+        update: {
+          title,
+          content: summary,
+          transcript: transcriptText,
+          hasTimestamps,
+          language,
+          // Replace topics: delete old ones and create new
+          topics: {
+            deleteMany: {},
+            create: topics.map((topic) => ({
+              title: topic.title,
+              startMs: topic.startMs,
+              endMs: topic.endMs,
+              order: topic.order,
+            })),
+          },
+          // Replace transcript segments
+          transcriptSegments: {
+            deleteMany: {},
+            create: transcriptSegmentsData,
+          },
+        },
+        create: {
           videoId,
           userId,
           title,
+          language,
           content: summary,
           transcript: transcriptText,
           hasTimestamps,
@@ -332,12 +568,8 @@ export async function POST(req: NextRequest) {
           },
         },
         include: {
-          topics: {
-            orderBy: { order: "asc" },
-          },
-          transcriptSegments: {
-            orderBy: { order: "asc" },
-          },
+          topics: { orderBy: { order: "asc" } },
+          transcriptSegments: { orderBy: { order: "asc" } },
         },
       });
 
@@ -376,25 +608,7 @@ export async function POST(req: NextRequest) {
       let errorMessage = "Failed to generate summary";
       let errorDetails: string | undefined;
 
-      if (error instanceof TranscriptError) {
-        switch (error.code) {
-          case "RATE_LIMIT_EXCEEDED":
-            errorMessage = "Rate limit exceeded. Please wait a moment and try again.";
-            break;
-          case "QUOTA_EXCEEDED":
-            errorMessage = "Monthly API quota exceeded. Please check your Supadata dashboard or wait for reset.";
-            break;
-          case "UNAUTHORIZED":
-            errorMessage = "Invalid API key. Please check your Supadata API key in settings.";
-            break;
-          case "SUPADATA_NOT_CONFIGURED":
-            errorMessage = "Supadata is not configured. Please add your API key in settings.";
-            break;
-          default:
-            errorMessage = error.message;
-        }
-        errorDetails = `Error code: ${error.code}`;
-      } else if (error instanceof LlmRateLimitError) {
+      if (error instanceof LlmRateLimitError) {
         errorMessage = error.message;
         errorDetails = error.retryAfterMs
           ? `Suggested retry after ${Math.ceil(error.retryAfterMs / 1000)}s`
@@ -420,7 +634,8 @@ export async function POST(req: NextRequest) {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
-      Connection: "keep-alive",
+      "Connection": "keep-alive",
+      ...corsHeaders(req),
     },
   });
 }
@@ -479,7 +694,9 @@ async function generateChapterBasedSummary(
   detailLevel: number,
   language: OutputLanguage,
   videoId: string,
-  userId: string
+  userId: string,
+  hasTimestamps: boolean,
+  onChunk?: (text: string) => void
 ): Promise<{ summary: string; modelUsed: ModelId; tokensUsed?: number }> {
   const config = DETAIL_CONFIGS[detailLevel] || DETAIL_CONFIGS[3];
   const languageName = LANGUAGE_NAMES[language] || "English";
@@ -508,7 +725,8 @@ Key principles:
     fullTranscript,
     videoId,
     config,
-    languageName
+    languageName,
+    hasTimestamps
   );
 
   const result = await callWithFallback(userPrompt, {
@@ -516,6 +734,7 @@ Key principles:
     maxTokens: 6144,
     temperature: 0.7,
     userId,
+    onChunk,
   });
 
   return {
@@ -532,7 +751,8 @@ function buildChapterBasedPrompt(
   transcript: string,
   videoId: string,
   config: DetailConfig,
-  languageName: string
+  languageName: string,
+  hasTimestamps: boolean
 ): string {
   const bulletPointInstruction = config.bulletPointsPerChapter <= 2
     ? `- Include only ${config.bulletPointsPerChapter} key bullet point(s) per chapter`
@@ -546,6 +766,13 @@ function buildChapterBasedPrompt(
     ? `- Focus on the top ${config.topChapterCount} most important chapters in detail
 - Briefly mention other chapters in a single line each`
     : `- Cover all identified chapters with appropriate depth`;
+
+  const timeLink = hasTimestamps
+    ? ` [(0:00)](https://youtube.com/watch?v=${videoId}&t=0s)`
+    : ``;
+  const timeRule = hasTimestamps
+    ? `\n- CRITICAL: Each chapter heading and each recommended chapter MUST include a real clickable timestamp link in this EXACT format: [(M:SS)](https://youtube.com/watch?v=${videoId}&t=Xs) where you replace M:SS with the actual chapter start time and X with the actual total seconds. For example: [(2:15)](https://youtube.com/watch?v=${videoId}&t=135s). NEVER write the word "Timestamp" or "XXs" — those are WRONG. Always use real numbers from the transcript timestamps.`
+    : ``;
 
   return `Analyze this video transcript and create a ${config.description} chapter-based summary.
 
@@ -565,17 +792,17 @@ ${transcript.slice(0, 12000)}${transcript.length > 12000 ? "\n\n[Transcript trun
 **Overview**: [2-3 sentences providing context - what this video covers and who it's for]
 
 **Recommended Chapters to Watch**:
-- [Chapter Name] - [Reason why this is worth watching in full] [(Timestamp)](https://youtube.com/watch?v=${videoId}&t=XXs)
-- [Another Chapter] - [Reason] [(Timestamp)](https://youtube.com/watch?v=${videoId}&t=XXs)
+- [Chapter Name] - [Reason why this is worth watching in full]${timeLink}
+- [Another Chapter] - [Reason]${timeLink}
 
 ---
 
-## Chapter 1: [Chapter Title] [(Timestamp)](https://youtube.com/watch?v=${videoId}&t=XXs)
+## Chapter 1: [Chapter Title]${timeLink}
 [2-3 sentence flowing summary of this chapter's content]
 ${bulletPointInstruction}
 ${transitionInstruction}
 
-## Chapter 2: [Chapter Title] [(Timestamp)](https://youtube.com/watch?v=${videoId}&t=XXs)
+## Chapter 2: [Chapter Title]${timeLink}
 [Continue with same structure...]
 
 ---
@@ -583,10 +810,8 @@ ${transitionInstruction}
 **Conclusion**: [Key takeaways and practical applications from the video]
 
 **Formatting Rules:**
-${chapterScopeInstruction}
-- Format timestamps as clickable links: [(MM:SS)](https://youtube.com/watch?v=${videoId}&t=XXs)
+${chapterScopeInstruction}${timeRule}
 - Use **bold** for key terms and concepts
-- Ensure chapter headings include the timestamp link
 - Be factual and neutral - summarize, don't critique`;
 }
 

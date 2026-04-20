@@ -29,7 +29,7 @@ export function validatePassword(password: string): { valid: boolean; error?: st
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
-    provider: "sqlite",
+    provider: "postgresql",
   }),
 
   emailAndPassword: {

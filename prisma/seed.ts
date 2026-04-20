@@ -1,11 +1,15 @@
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3"
-import { PrismaClient } from "@prisma/client"
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '@prisma/client';
+import { config } from 'dotenv';
 
-const adapter = new PrismaBetterSqlite3({
-  url: process.env.DATABASE_URL ?? "file:./dev.db",
-})
+// Load .env so DATABASE_URL is available
+config();
 
-const prisma = new PrismaClient({ adapter })
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL,
+});
+
+const prisma = new PrismaClient({ adapter });
 
 const securityQuestions = [
   "What was the name of your first pet?",
@@ -23,27 +27,27 @@ const securityQuestions = [
   "What was your favorite food as a child?",
   "What is the name of the hospital where you were born?",
   "What is the name of your favorite book?",
-]
+];
 
 async function main() {
-  console.log("Seeding security questions...")
+  console.log("Seeding security questions to Supabase...");
 
   for (const question of securityQuestions) {
     await prisma.securityQuestion.upsert({
       where: { question },
       update: {},
       create: { question },
-    })
+    });
   }
 
-  console.log(`Seeded ${securityQuestions.length} security questions`)
+  console.log(`✅ Seeded ${securityQuestions.length} security questions`);
 }
 
 main()
   .catch((e) => {
-    console.error(e)
-    process.exit(1)
+    console.error(e);
+    process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect()
-  })
+    await prisma.$disconnect();
+  });

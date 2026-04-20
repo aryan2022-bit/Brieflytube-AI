@@ -60,6 +60,7 @@ export interface LlmCallOptions {
   systemPrompt?: string;
   preferredModel?: ModelId;
   userId?: string;
+  onChunk?: (text: string) => void;
 }
 
 function parseRetryAfterMs(errorMessage: string): number | undefined {
@@ -146,6 +147,7 @@ export async function callWithFallback(
         temperature,
         systemPrompt,
         userId,
+        onChunk: options.onChunk,
       });
       if (result) {
         return result;
@@ -188,7 +190,7 @@ export async function callWithFallback(
 async function callModel(
   modelId: ModelId,
   prompt: string,
-  options: { maxTokens: number; temperature: number; systemPrompt?: string; userId: string }
+  options: { maxTokens: number; temperature: number; systemPrompt?: string; userId: string; onChunk?: (text: string) => void }
 ): Promise<LlmResponse | null> {
   switch (modelId) {
     case "glm-4.7-flash":
@@ -204,7 +206,7 @@ async function callModel(
  */
 async function callGlm(
   prompt: string,
-  options: { maxTokens: number; temperature: number; systemPrompt?: string; userId: string }
+  options: { maxTokens: number; temperature: number; systemPrompt?: string; userId: string; onChunk?: (text: string) => void }
 ): Promise<LlmResponse | null> {
   const apiModelName = "glm-4.7-flash";
   const endpointErrors: string[] = [];
@@ -213,20 +215,30 @@ async function callGlm(
   try {
     const codingClient = await getGlmCodingClient(options.userId);
     if (codingClient) {
-      const response = await codingClient.messages.create({
+      const stream = await codingClient.messages.create({
         model: apiModelName,
         max_tokens: options.maxTokens,
         system: options.systemPrompt,
         messages: [{ role: "user", content: prompt }],
+        stream: true,
       });
 
-      const textBlock = response.content.find((block) => block.type === "text");
-      if (textBlock && textBlock.type === "text") {
+      let fullText = "";
+      for await (const chunk of stream) {
+        if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
+          const textChunk = chunk.delta.text || "";
+          if (textChunk) {
+            fullText += textChunk;
+            if (options.onChunk) options.onChunk(textChunk);
+          }
+        }
+      }
+
+      if (fullText) {
         return {
-          response: textBlock.text,
+          response: fullText,
           modelUsed: "glm-4.7-flash",
-          tokensUsed:
-            response.usage.input_tokens + response.usage.output_tokens,
+          tokensUsed: 0,
         };
       }
     }
@@ -252,17 +264,31 @@ async function callGlm(
       messages,
       max_tokens: options.maxTokens,
       temperature: options.temperature,
+      stream: true,
+      stream_options: { include_usage: true },
     });
 
-    const content = completion.choices[0]?.message?.content;
-    if (!content) {
+    let fullText = "";
+    let finalUsage = 0;
+    for await (const chunk of completion) {
+      if (chunk.usage) {
+        finalUsage = chunk.usage.total_tokens;
+      }
+      const content = chunk.choices[0]?.delta?.content || "";
+      if (content) {
+        fullText += content;
+        if (options.onChunk) options.onChunk(content);
+      }
+    }
+
+    if (!fullText) {
       throw new Error("No content in GLM response");
     }
 
     return {
-      response: content,
+      response: fullText,
       modelUsed: "glm-4.7-flash",
-      tokensUsed: completion.usage?.total_tokens,
+      tokensUsed: finalUsage,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";

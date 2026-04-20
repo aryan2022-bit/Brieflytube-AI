@@ -196,14 +196,14 @@ export default function RegisterPage() {
               <div className="w-10 h-10 flex items-center justify-center">
                 <Image
                   src="/logo.png"
-                  alt="YT Summarizer Logo"
+                  alt="Brieflytube AI Logo"
                   width={40}
                   height={40}
                   className="w-full h-full object-contain"
                 />
               </div>
               <span className="font-display text-xl font-semibold text-slate-900">
-                YT Summarizer
+                Brieflytube AI
               </span>
             </Link>
           </motion.div>

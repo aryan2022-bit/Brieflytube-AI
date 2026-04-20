@@ -21,8 +21,8 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "YouTube Summarizer",
-  description: "AI-powered YouTube video summarization",
+  title: "Brieflytube AI",
+  description: "AI-powered YouTube video summarizer. Get instant chapter-based summaries with clickable timestamps.",
   icons: {
     icon: "/logo.png",
     apple: "/logo.png",
@@ -35,19 +35,20 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
       <body
         className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} font-sans`}
       >
         <Providers>
-          <div className="flex min-h-screen">
+          <div className="flex h-screen overflow-hidden">
             {/* Minimal Sidebar - Hidden on mobile, visible on md+ */}
             <Sidebar className="hidden md:flex" />
             {/* Mobile Sidebar - centralized here for all pages */}
             <MobileSidebar />
 
-            {/* Main Content Area */}
-            <main className="flex-1 min-h-screen gradient-mesh overflow-y-auto">
+            {/* Main Content Area — overflow-y-auto so history/settings pages scroll;
+                dashboard page uses h-screen on its own root to prevent window scroll */}
+            <main className="flex-1 overflow-y-auto">
               {children}
             </main>
           </div>

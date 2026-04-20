@@ -60,6 +60,59 @@
 
     --radius: 0.875rem;
   }
+
+  /* ═══════════════════════════════════════
+     DARK MODE — Deep Void with Neon Accents
+     matches Chrome extension branding
+     ═══════════════════════════════════════ */
+  .dark {
+    --background: 228 20% 8%;
+    --background-deep: 228 22% 6%;
+    --background-elevated: 228 18% 12%;
+    --background-hover: 228 16% 16%;
+
+    /* Neon indigo + cyan accents */
+    --accent-primary: 252 84% 67%;
+    --accent-primary-bright: 252 90% 74%;
+    --accent-primary-glow: 252 84% 67%;
+
+    --accent-secondary: 174 66% 51%;
+    --accent-secondary-dim: 174 60% 44%;
+
+    --success: 155 65% 50%;
+    --youtube-red: 348 85% 60%;
+
+    --text-primary: 220 20% 94%;
+    --text-secondary: 220 12% 65%;
+    --text-muted: 220 10% 45%;
+
+    --foreground: 220 20% 94%;
+
+    --card: 228 18% 12%;
+    --card-foreground: 220 20% 94%;
+
+    --popover: 228 20% 11%;
+    --popover-foreground: 220 20% 94%;
+
+    --primary: 252 84% 67%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 228 16% 18%;
+    --secondary-foreground: 220 20% 84%;
+
+    --muted: 228 16% 18%;
+    --muted-foreground: 220 12% 55%;
+
+    --accent: 174 66% 51%;
+    --accent-foreground: 228 22% 6%;
+
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 228 16% 20%;
+    --input: 228 16% 20%;
+    --ring: 252 84% 67%;
+  }
 }
 
 @layer base {
@@ -118,6 +171,27 @@
   }
 }
 
+/* Dark mode overrides for card utilities — cannot use dark: inside @apply */
+.dark .card-soft {
+  background-color: hsl(228 18% 12%);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .card-soft-hover {
+  background-color: hsl(228 18% 12%);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.dark .card-soft-hover:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.dark .card-elevated {
+  background-color: hsl(228 18% 13%);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
 /* Soft Gradient Background - Portrait Style */
 @layer components {
   .gradient-soft {
@@ -129,12 +203,29 @@
       hsl(var(--background-deep));
   }
 
+  .dark .gradient-soft {
+    background:
+      radial-gradient(ellipse 60% 40% at 20% 10%, hsl(252 84% 67% / 0.06), transparent),
+      radial-gradient(ellipse 50% 50% at 80% 20%, hsl(174 66% 51% / 0.05), transparent),
+      radial-gradient(ellipse 40% 40% at 60% 80%, hsl(280 70% 60% / 0.04), transparent),
+      hsl(var(--background-deep));
+  }
+
   .gradient-soft-animated {
     background:
       radial-gradient(ellipse 60% 40% at 20% 10%, hsl(260 60% 92% / 0.7), transparent),
       radial-gradient(ellipse 50% 50% at 80% 20%, hsl(175 50% 90% / 0.6), transparent),
       radial-gradient(ellipse 70% 60% at 60% 80%, hsl(320 50% 92% / 0.5), transparent),
       radial-gradient(ellipse 40% 40% at 10% 70%, hsl(220 60% 94% / 0.6), transparent),
+      hsl(var(--background-deep));
+    animation: gradient-breathe 15s ease-in-out infinite;
+  }
+
+  .dark .gradient-soft-animated {
+    background:
+      radial-gradient(ellipse 60% 40% at 20% 10%, hsl(252 84% 67% / 0.08), transparent),
+      radial-gradient(ellipse 50% 50% at 80% 20%, hsl(174 66% 51% / 0.06), transparent),
+      radial-gradient(ellipse 40% 40% at 55% 85%, hsl(280 70% 60% / 0.05), transparent),
       hsl(var(--background-deep));
     animation: gradient-breathe 15s ease-in-out infinite;
   }
