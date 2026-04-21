@@ -733,13 +733,20 @@ chrome.runtime.onMessage.addListener((message) => {
       const displayUrl = url.length > 45 ? url.slice(0, 42) + '…' : url;
       detectText.textContent = `Detected: ${displayUrl}`;
 
-      // Immediately wipe previous summary state out to prevent confusion
+      // Wipe all state for the new video: summary, chat history, and chat messages
       resultSection.style.display = 'none';
       summaryContent.innerHTML = '';
       setStatus('ready');
       chrome.storage.local.remove(['lastSummary']);
 
-      console.log('[YT Summarizer] URL received and UI reset for new video:', url);
+      // ── Reset chat for the new video ──────────────────────────────────
+      chatMessages.innerHTML = '';   // clear old messages
+      chatHistory  = [];             // clear conversation history
+      chatVideoId  = null;           // no video associated yet
+      tabChatBtn.disabled = true;    // disabled until new summary is done
+      switchToTab('summary');        // always start on summary tab
+
+      console.log('[YT Summarizer] Full reset for new video:', url);
     }
   } else if (message.type === 'NOT_YOUTUBE_TAB') {
     showNotYouTube();
@@ -818,11 +825,15 @@ if (chatBackBtn) chatBackBtn.addEventListener('click', () => switchToTab('summar
 
 // ── Initialise chat for a video ───────────────────────────────────────
 function initChat(videoId) {
+  const isNewVideo = chatVideoId !== videoId; // check BEFORE overwriting
   chatVideoId = videoId;
   tabChatBtn.disabled = false;
 
-  // Reset history when starting a fresh video (not resuming same one)
-  if (chatVideoId !== videoId) chatHistory = [];
+  // Always reset history and messages when starting a fresh video
+  if (isNewVideo) {
+    chatHistory = [];
+    chatMessages.innerHTML = '';
+  }
 
   if (chatMessages.children.length === 0) {
     chatMessages.innerHTML = `
