@@ -221,9 +221,28 @@
 
       <!-- ── Chat Panel ── -->
       <div id="chat-panel" style="display:none;">
-        <div class="sp-chat-msgs" id="chat-messages">
-          <!-- Intro message injected by JS -->
+
+        <!-- Sticky chat header: back button + title -->
+        <div class="sp-chat-header">
+          <button class="sp-chat-back" id="chat-back-btn">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+            Summary
+          </button>
+          <div class="sp-chat-header-title">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            AI Chat
+          </div>
+          <div style="width:70px"></div>
         </div>
+
+        <div class="sp-chat-msgs" id="chat-messages">
+          <!-- Messages injected by JS -->
+        </div>
+
         <div class="sp-chat-input-bar">
           <textarea
             id="chat-input"
@@ -233,10 +252,14 @@
             maxlength="1000"
           ></textarea>
           <button class="sp-chat-send" id="chat-send-btn" title="Send">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
           </button>
         </div>
       </div>
+
 
     </section>
 

@@ -778,29 +778,32 @@ if (themeToggle) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// ── CHAT SYSTEM (Phase 4 — RAG) ──────────────────────────────────────
+// ── CHAT SYSTEM — Premium v2 (RAG + Conversation History)
 // ══════════════════════════════════════════════════════════════════════
 
-// ── DOM refs ─────────────────────────────────────────────────────────
-const tabSummaryBtn  = document.getElementById('tab-summary');
-const tabChatBtn     = document.getElementById('tab-chat');
-const summaryPanel   = document.getElementById('summary-panel');
-const chatPanel      = document.getElementById('chat-panel');
-const chatMessages   = document.getElementById('chat-messages');
-const chatInput      = document.getElementById('chat-input');
-const chatSendBtn    = document.getElementById('chat-send-btn');
+// ── DOM refs ──────────────────────────────────────────────────────────
+const tabSummaryBtn = document.getElementById('tab-summary');
+const tabChatBtn    = document.getElementById('tab-chat');
+const summaryPanel  = document.getElementById('summary-panel');
+const chatPanel     = document.getElementById('chat-panel');
+const chatMessages  = document.getElementById('chat-messages');
+const chatInput     = document.getElementById('chat-input');
+const chatSendBtn   = document.getElementById('chat-send-btn');
+const chatBackBtn   = document.getElementById('chat-back-btn');
 
 // ── State ─────────────────────────────────────────────────────────────
-let chatVideoId     = null;    // set when a summary completes
-let chatBusy        = false;   // prevents concurrent requests
+let chatVideoId  = null;  // set when a summary completes
+let chatBusy     = false; // prevents concurrent requests
+let chatHistory  = [];    // [{role:'user'|'assistant', content:string}]
 
 // ── Tab switching ─────────────────────────────────────────────────────
 function switchToTab(tab) {
   const isSummary = tab === 'summary';
   tabSummaryBtn.classList.toggle('sp-tab--active', isSummary);
   tabChatBtn.classList.toggle('sp-tab--active', !isSummary);
-  summaryPanel.style.display = isSummary ? '' : 'none';
-  chatPanel.style.display    = isSummary ? 'none' : 'flex';
+  summaryPanel.style.display    = isSummary ? '' : 'none';
+  chatPanel.style.display       = isSummary ? 'none' : 'flex';
+  chatPanel.style.flexDirection = isSummary ? ''     : 'column';
   if (!isSummary) {
     chatInput.focus();
     scrollChatToBottom();
@@ -810,50 +813,86 @@ function switchToTab(tab) {
 tabSummaryBtn.addEventListener('click', () => switchToTab('summary'));
 tabChatBtn.addEventListener('click',    () => switchToTab('chat'));
 
+// Back button inside chat panel → go back to Summary tab
+if (chatBackBtn) chatBackBtn.addEventListener('click', () => switchToTab('summary'));
+
 // ── Initialise chat for a video ───────────────────────────────────────
 function initChat(videoId) {
   chatVideoId = videoId;
   tabChatBtn.disabled = false;
 
-  // Show intro only when the messages area is empty (fresh video)
+  // Reset history when starting a fresh video (not resuming same one)
+  if (chatVideoId !== videoId) chatHistory = [];
+
   if (chatMessages.children.length === 0) {
     chatMessages.innerHTML = `
       <div class="sp-chat-intro">
         <div class="sp-chat-intro-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
           </svg>
         </div>
         <p><strong>Chat about this video</strong></p>
-        <p>Ask me anything &#8212; what it covers, key points, specific details&#8230;</p>
+        <p>Ask me anything &#8212; key points, details, moments in the video&#8230;</p>
       </div>`;
   }
 }
 
-
-// ── Scroll chat to bottom ─────────────────────────────────────────────
+// ── Scroll to bottom ──────────────────────────────────────────────────
 function scrollChatToBottom() {
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
+// ── Markdown renderer (safe — escapes HTML first) ─────────────────────
+function renderChatMarkdown(text) {
+  let s = text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // Bold / italic / code
+  s = s
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.+?)\*\*/g,     '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,         '<em>$1</em>')
+    .replace(/`([^`]+)`/g,         '<code>$1</code>');
+
+  // Bullet lists — collect consecutive list lines
+  s = s.replace(/(?:^[-•*] .+(?:\n|$))+/gm, match => {
+    const items = match.trim().split('\n')
+      .map(l => `<li>${l.replace(/^[-•*]\s+/, '')}</li>`)
+      .join('');
+    return `<ul class="sp-chat-list">${items}</ul>`;
+  });
+
+  // Paragraphs
+  s = s.replace(/\n\n/g, '<br><br>').replace(/\n/g, '<br>');
+  return s;
+}
+
 // ── Append a message bubble ───────────────────────────────────────────
 function appendMessage(role, text) {
-  // Remove intro card if present
   const intro = chatMessages.querySelector('.sp-chat-intro');
   if (intro) intro.remove();
 
   const wrap = document.createElement('div');
   wrap.className = `sp-chat-msg sp-chat-msg--${role}`;
 
+  // AI gets a gradient avatar
+  if (role === 'ai') {
+    const avatar = document.createElement('div');
+    avatar.className = 'sp-chat-avatar';
+    avatar.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936 A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>`;
+    wrap.appendChild(avatar);
+  }
+
   const bubble = document.createElement('div');
   bubble.className = 'sp-chat-bubble';
-  bubble.textContent = text || '';
+  if (text) bubble.textContent = text;
   wrap.appendChild(bubble);
 
   chatMessages.appendChild(wrap);
   scrollChatToBottom();
-  return bubble;  // returned so streaming can update it in-place
+  return bubble;
 }
 
 // ── Send a chat message ───────────────────────────────────────────────
@@ -866,33 +905,38 @@ async function sendChatMessage() {
   chatInput.style.height = 'auto';
   chatSendBtn.disabled = true;
 
-  // Render user bubble
   appendMessage('user', text);
 
-  // Render thinking AI bubble with cursor
+  // AI bubble starts with 3 bouncing dots
   const aiBubble = appendMessage('ai', '');
-  aiBubble.innerHTML = '<span class="sp-chat-cursor"></span>';
-  const aiWrap = aiBubble.parentElement;
-  aiWrap.classList.add('sp-chat-msg--thinking');
+  aiBubble.innerHTML = `
+    <div class="sp-chat-typing">
+      <div class="sp-chat-dot"></div>
+      <div class="sp-chat-dot"></div>
+      <div class="sp-chat-dot"></div>
+    </div>`;
 
   let fullText = '';
+  let firstChunk = true;
 
   try {
     const resp = await fetch(`${API_BASE}/api/chat`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, videoId: chatVideoId }),
+      body: JSON.stringify({
+        message: text,
+        videoId: chatVideoId,
+        history: chatHistory.slice(-6),   // last 3 Q&A pairs
+      }),
     });
 
     if (resp.status === 401) {
       aiBubble.textContent = '⚠️ Not signed in. Open the dashboard and log in first.';
-      aiWrap.classList.remove('sp-chat-msg--thinking');
       return;
     }
     if (!resp.ok) {
       aiBubble.textContent = `⚠️ Server error (${resp.status}). Please try again.`;
-      aiWrap.classList.remove('sp-chat-msg--thinking');
       return;
     }
 
@@ -916,11 +960,15 @@ async function sendChatMessage() {
 
         if (ev.type === 'chunk') {
           fullText += ev.text || '';
-          aiWrap.classList.remove('sp-chat-msg--thinking');
-          aiBubble.innerHTML = escapeHtml(fullText) + '<span class="sp-chat-cursor"></span>';
+          if (firstChunk) {
+            firstChunk = false;
+            aiBubble.innerHTML = renderChatMarkdown(fullText);
+          } else {
+            aiBubble.innerHTML = renderChatMarkdown(fullText);
+          }
           scrollChatToBottom();
         } else if (ev.type === 'done') {
-          aiBubble.textContent = fullText || '(no response)';
+          aiBubble.innerHTML = renderChatMarkdown(fullText || '(no response)');
         } else if (ev.type === 'error') {
           aiBubble.textContent = `⚠️ ${ev.error || 'Something went wrong.'}`;
         }
@@ -929,10 +977,16 @@ async function sendChatMessage() {
 
     reader.releaseLock();
 
-    // Finalize — remove cursor
-    if (!aiBubble.querySelector('.sp-chat-cursor') === false) {
-      aiBubble.textContent = fullText || '(no response)';
+    // Finalize markdown
+    if (fullText) {
+      aiBubble.innerHTML = renderChatMarkdown(fullText);
+      // Track conversation history for follow-up questions
+      chatHistory.push({ role: 'user',      content: text     });
+      chatHistory.push({ role: 'assistant', content: fullText });
+      // Cap history at 10 entries (5 pairs)
+      if (chatHistory.length > 10) chatHistory = chatHistory.slice(-10);
     }
+
   } catch (err) {
     console.error('[Chat] fetch error:', err);
     aiBubble.textContent = '⚠️ Could not reach the server. Is it running?';
@@ -944,18 +998,8 @@ async function sendChatMessage() {
   }
 }
 
-// ── Simple HTML escaper (prevents XSS in bubbles) ─────────────────────
-function escapeHtml(str) {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 // ── Send button + Enter key ───────────────────────────────────────────
 chatSendBtn.addEventListener('click', sendChatMessage);
-
 chatInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
@@ -971,3 +1015,5 @@ chatInput.addEventListener('input', () => {
 
 // Chat tab starts disabled until a summary loads
 if (tabChatBtn) tabChatBtn.disabled = true;
+
+

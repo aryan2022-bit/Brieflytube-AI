@@ -1422,3 +1422,263 @@ button.ts-link:focus-visible {
   line-height: 1.5;
   max-width: 240px;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CHAT UI REDESIGN — Premium v2
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Chat panel sticky header ────────────────────────────────────────── */
+.sp-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex-shrink: 0;
+}
+
+.sp-chat-back {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.sp-chat-back:hover {
+  color: var(--accent);
+  border-color: var(--accent-light);
+  background: var(--accent-dim);
+}
+
+.sp-chat-header-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ── Messages scroll area ────────────────────────────────────────────── */
+.sp-chat-msgs {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 12px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 160px;
+  max-height: 340px;
+  scroll-behavior: smooth;
+}
+
+/* ── Message row ─────────────────────────────────────────────────────── */
+.sp-chat-msg {
+  display: flex;
+  gap: 8px;
+  animation: fade-in 0.2s ease;
+  max-width: 100%;
+}
+
+.sp-chat-msg--user {
+  justify-content: flex-end;
+}
+
+.sp-chat-msg--ai {
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+/* ── AI avatar ───────────────────────────────────────────────────────── */
+.sp-chat-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--teal) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+  margin-top: 2px;
+  box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+/* ── Bubble shared ───────────────────────────────────────────────────── */
+.sp-chat-bubble {
+  padding: 9px 13px;
+  font-size: 12px;
+  line-height: 1.58;
+  word-break: break-word;
+  max-width: 82%;
+}
+
+/* ── User bubble — gradient ──────────────────────────────────────────── */
+.sp-chat-msg--user .sp-chat-bubble {
+  background: linear-gradient(135deg, var(--accent), hsl(252, 84%, 73%));
+  color: #fff;
+  border-radius: 14px 4px 14px 14px;
+  box-shadow: 0 2px 10px var(--accent-glow);
+}
+
+/* ── AI bubble — elevated card ───────────────────────────────────────── */
+.sp-chat-msg--ai .sp-chat-bubble {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px 14px 14px 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Markdown inside AI bubbles */
+.sp-chat-bubble strong { font-weight: 600; }
+.sp-chat-bubble em     { font-style: italic; }
+.sp-chat-bubble code   {
+  background: var(--bg-hover);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  font-family: monospace;
+}
+.sp-chat-list {
+  margin: 4px 0 0 16px;
+  padding: 0;
+  list-style: disc;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── Typing dots indicator ───────────────────────────────────────────── */
+.sp-chat-typing {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 2px 4px;
+}
+
+.sp-chat-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: bounce-dot 1.3s ease infinite;
+  opacity: 0.7;
+}
+
+.sp-chat-dot:nth-child(2) { animation-delay: 0.18s; }
+.sp-chat-dot:nth-child(3) { animation-delay: 0.36s; }
+
+@keyframes bounce-dot {
+  0%, 60%, 100% { transform: translateY(0);   opacity: 0.4; }
+  30%            { transform: translateY(-7px); opacity: 1;   }
+}
+
+/* ── Input bar ───────────────────────────────────────────────────────── */
+.sp-chat-input-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 7px;
+  padding: 8px 10px 10px;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.sp-chat-textarea {
+  flex: 1;
+  resize: none;
+  background: var(--bg-elevated);
+  border: 1.5px solid var(--border);
+  border-radius: 20px;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 7px 14px;
+  outline: none;
+  font-family: inherit;
+  max-height: 80px;
+  overflow-y: auto;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.sp-chat-textarea::placeholder { color: var(--text-muted); }
+
+.sp-chat-textarea:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.sp-chat-send {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), hsl(252, 84%, 73%));
+  border: none;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 10px var(--accent-glow);
+  transition: transform 0.15s, opacity 0.15s;
+}
+
+.sp-chat-send:hover:not(:disabled) {
+  transform: scale(1.1);
+  opacity: 0.92;
+}
+
+.sp-chat-send:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ── Intro card ──────────────────────────────────────────────────────── */
+.sp-chat-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 16px 20px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.sp-chat-intro-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent-dim), var(--teal-dim));
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.sp-chat-intro p { font-size: 11.5px; line-height: 1.5; }
+.sp-chat-intro strong { color: var(--text-secondary); font-weight: 600; }
+
+/* Light theme overrides */
+[data-theme="light"] .sp-chat-msg--ai .sp-chat-bubble {
+  background: hsl(220, 28%, 97%);
+  border-color: hsl(220, 16%, 88%);
+}

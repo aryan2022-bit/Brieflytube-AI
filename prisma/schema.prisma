@@ -124,6 +124,7 @@ model Summary {
   topics             Topic[]
   topicEdits         UserTopicEdit[]
   transcriptSegments TranscriptSegment[]
+  transcriptChunks   TranscriptChunk[]   // RAG chunks with embeddings
 
   @@unique([videoId, userId, language])   // one summary per video/user/language combo
   @@index([userId])
@@ -203,4 +204,24 @@ model TranscriptSegment {
   summary Summary @relation(fields: [summaryId], references: [id], onDelete: Cascade)
 
   @@index([summaryId, order])
+}
+
+// ============================================
+// RAG: Transcript Chunks + Vector Embeddings
+// ============================================
+
+model TranscriptChunk {
+  id         String   @id @default(cuid())
+  summaryId  String                         // which summary (and language) this chunk belongs to
+  videoId    String                         // denormalised for fast vector search without joins
+  userId     String                         // scoped to user for security
+  text       String                         // the raw transcript chunk text (~500 chars)
+  embedding  Unsupported("vector(3072)")     // gemini-embedding-001 (3072 dims, confirmed)
+  chunkIndex Int                            // order within the transcript
+  createdAt  DateTime @default(now())
+
+  summary Summary @relation(fields: [summaryId], references: [id], onDelete: Cascade)
+
+  @@index([summaryId])
+  @@index([videoId, userId])  // for chat lookup: give me all chunks for this video
 }

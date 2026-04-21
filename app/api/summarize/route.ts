@@ -13,6 +13,7 @@ import {
 import { extractTopics, type ExtractedTopic } from "@/lib/topicExtraction";
 import { logApiUsage } from "@/lib/usageLogger";
 import { authenticateRequest } from "@/lib/apiAuth";
+import { ingestTranscriptChunks } from "@/lib/ingestTranscriptChunks";
 import { checkRateLimit } from "@/lib/rateLimit";
 
 /**
@@ -601,6 +602,19 @@ export async function POST(req: NextRequest) {
         },
         status: "completed",
       });
+
+      // ── RAG Ingestion (Phase 2) ──────────────────────────────────────────
+      // Fire-and-forget: run AFTER the SSE "complete" event is written so the
+      // user already has their summary. Any failure here is logged only —
+      // it must NEVER surface to the user or break the summarize flow.
+      ingestTranscriptChunks({
+        summaryId:  savedSummary.id,
+        videoId,
+        userId,
+        transcript: transcriptText,
+      }).catch((err) =>
+        console.error("[RAG] Background ingestion failed — will retry next summarise:", err)
+      );
     } catch (error) {
       console.error("Summarize error:", error);
 

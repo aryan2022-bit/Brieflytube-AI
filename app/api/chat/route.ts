@@ -75,9 +75,17 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const body = await req.json() as { message?: string; videoId?: string };
+  const body = await req.json() as {
+    message?: string;
+    videoId?: string;
+    history?: Array<{ role: string; content: string }>;
+  };
   const message = body.message?.trim();
   const videoId = body.videoId?.trim();
+  // Conversation history — last 6 entries (3 Q&A pairs) for follow-up support
+  const history = (Array.isArray(body.history) ? body.history : [])
+    .filter(h => h && typeof h.role === 'string' && typeof h.content === 'string')
+    .slice(-6);
 
   if (!message || !videoId) {
     return NextResponse.json(
@@ -182,6 +190,13 @@ export async function POST(req: NextRequest) {
         ? "\n7. The user may be asking about something very specific or niche. If you cannot find a clear answer in the content below, be honest: say you're not sure or that part wasn't very detailed in the video."
         : "";
 
+      // Include prior conversation so the LLM can handle follow-up questions
+      const historyBlock = history.length > 0
+        ? `\n\nCONVERSATION HISTORY (earlier in this chat session):\n${history
+            .map(h => `${h.role === "user" ? "User" : "You"}: ${h.content}`)
+            .join("\n")}\n\nNow respond to the latest message:`
+        : "";
+
       const systemPrompt = `You are a knowledgeable AI assistant who has thoroughly watched and understood a YouTube video. Your job is to answer questions about it naturally and helpfully.
 
 CRITICAL RULES — follow without exception:
@@ -189,7 +204,7 @@ CRITICAL RULES — follow without exception:
 2. If the answer is in the video content below, answer directly and confidently in your own words.
 3. If the information is not covered, say: "That part wasn't covered in the video" or "I don't recall that being mentioned."
 4. Keep answers concise and conversational. 2–4 sentences unless the question needs more detail.
-5. Do not start with filler like "Certainly!", "Sure!", "Great question!", or "Of course!".${temporalHint}${confidenceHint}
+5. Do not start with filler like "Certainly!", "Sure!", "Great question!", or "Of course!".${temporalHint}${confidenceHint}${historyBlock}
 
 VIDEO CONTENT:
 ${context}`;
