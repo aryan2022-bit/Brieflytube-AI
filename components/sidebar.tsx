@@ -215,7 +215,7 @@ interface NavItemProps {
 
 function NavItem({ icon: Icon, label, href, isActive, isExpanded }: NavItemProps) {
   return (
-    <Tooltip>
+    <Tooltip open={isExpanded ? false : undefined}>
       <TooltipTrigger asChild>
         <Link
           href={href}

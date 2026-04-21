@@ -702,9 +702,26 @@ summarizeBtn.addEventListener('click', async () => {
   }
 });
 
-// ── Message listener — background.js sends YouTube URL ──────────────
+// ── Message listener — background.js sends YouTube URL or non-YouTube event ──
+const notYtState  = document.getElementById('not-yt-state');
+const mainCard    = document.querySelector('.sp-card');
+
+function showNotYouTube() {
+  if (notYtState) notYtState.style.display = 'flex';
+  if (mainCard)   mainCard.style.display    = 'none';
+  loadingState.style.display  = 'none';
+  errorState.style.display    = 'none';
+  resultSection.style.display = 'none';
+}
+
+function restoreFromNotYouTube() {
+  if (notYtState) notYtState.style.display = 'none';
+  if (mainCard)   mainCard.style.display    = '';
+}
+
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'YOUTUBE_URL_DETECTED' && message.url) {
+    restoreFromNotYouTube();
     const url = message.url;
     // Only trigger UI reset if diving into a legitimately new distinct video URL
     if (currentVideoUrl !== url) {
@@ -715,15 +732,17 @@ chrome.runtime.onMessage.addListener((message) => {
       detectBanner.style.display = 'flex';
       const displayUrl = url.length > 45 ? url.slice(0, 42) + '…' : url;
       detectText.textContent = `Detected: ${displayUrl}`;
-      
+
       // Immediately wipe previous summary state out to prevent confusion
       resultSection.style.display = 'none';
       summaryContent.innerHTML = '';
       setStatus('ready');
       chrome.storage.local.remove(['lastSummary']);
-      
+
       console.log('[YT Summarizer] URL received and UI reset for new video:', url);
     }
+  } else if (message.type === 'NOT_YOUTUBE_TAB') {
+    showNotYouTube();
   }
 });
 

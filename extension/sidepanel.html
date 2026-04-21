@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Brieflytube AI</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+
+  <!-- ─── HEADER ──────────────────────────────────────────────────────── -->
+  <header class="sp-header">
+    <div class="sp-logo">
+      <img src="icons/icon48.png" alt="Brieflytube AI" class="sp-logo-img" />
+      <span class="sp-logo-text">Briefly<span class="sp-logo-accent">tube</span> <span class="sp-logo-ai">AI</span></span>
+    </div>
+    <div class="sp-header-right">
+      <!-- Theme Toggle -->
+      <button class="sp-theme-btn" id="theme-toggle" title="Toggle theme" aria-label="Toggle dark/light mode">
+        <!-- Moon icon (shown in light mode to switch to dark) -->
+        <svg class="sp-theme-icon sp-icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+        <!-- Sun icon (shown in dark mode to switch to light) -->
+        <svg class="sp-theme-icon sp-icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="5"/>
+          <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+          <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+        </svg>
+      </button>
+      <!-- Status Badge -->
+      <div class="sp-header-badge" id="status-badge">
+        <span class="sp-badge-dot"></span>
+        <span class="sp-badge-label">Ready</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ─── MAIN SCROLL AREA ─────────────────────────────────────────────── -->
+  <main class="sp-main">
+
+    <!-- Detection Banner -->
+    <div class="sp-detect-banner" id="detect-banner" style="display:none;">
+      <div class="sp-detect-icon">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </div>
+      <span class="sp-detect-text" id="detect-text">YouTube video detected</span>
+    </div>
+
+    <!-- Input Card -->
+    <section class="sp-card">
+
+      <!-- URL Field -->
+      <div class="sp-field">
+        <label class="sp-label" for="url-input">YouTube URL</label>
+        <div class="sp-input-wrap" id="url-input-wrap">
+          <div class="sp-input-icon">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+            </svg>
+          </div>
+          <input type="url" id="url-input" class="sp-input"
+            placeholder="https://www.youtube.com/watch?v=..."
+            autocomplete="off" spellcheck="false" />
+          <button class="sp-input-clear" id="url-clear" title="Clear" style="display:none;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+        <p class="sp-field-error" id="url-error" style="display:none;"></p>
+      </div>
+
+      <!-- Model + Language -->
+      <div class="sp-row">
+
+        <div class="sp-field sp-field-half">
+          <label class="sp-label" for="model-select">AI Model</label>
+          <div class="sp-select-wrap" id="model-select-wrap">
+            <div class="sp-select-icon sp-model-icon">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73A2 2 0 0 1 10 4a2 2 0 0 1 2-2z"/>
+              </svg>
+            </div>
+            <select id="model-select" class="sp-select">
+              <option value="glm-4.7-flash">GLM-4.7 Flash</option>
+            </select>
+            <div class="sp-select-chevron">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+          </div>
+        </div>
+
+        <div class="sp-field sp-field-half">
+          <label class="sp-label" for="lang-select">Language</label>
+          <div class="sp-select-wrap">
+            <div class="sp-select-icon sp-lang-icon">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+              </svg>
+            </div>
+            <select id="lang-select" class="sp-select">
+              <option value="en">English</option>
+              <option value="hi">Hindi</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="pt">Portuguese</option>
+              <option value="zh">Chinese</option>
+              <option value="ja">Japanese</option>
+              <option value="ko">Korean</option>
+              <option value="ar">Arabic</option>
+              <option value="ru">Russian</option>
+              <option value="it">Italian</option>
+            </select>
+            <div class="sp-select-chevron">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Summarize Button -->
+      <button class="sp-btn-primary" id="summarize-btn" disabled>
+        <span class="sp-btn-inner" id="btn-content">
+          <svg class="sp-btn-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
+          </svg>
+          Summarize Video
+        </span>
+        <div class="sp-btn-shimmer"></div>
+      </button>
+
+    </section>
+
+    <!-- ─── OUTPUT AREA ───────────────────────────────────────────────── -->
+
+    <!-- Loading State -->
+    <div class="sp-loading" id="loading-state" style="display:none;">
+      <div class="sp-loading-orb">
+        <div class="sp-loading-ring"></div>
+        <div class="sp-loading-ring sp-loading-ring-2"></div>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="sp-loading-icon">
+          <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
+        </svg>
+      </div>
+      <p class="sp-loading-text">Generating summary<span class="sp-dots"><span>.</span><span>.</span><span>.</span></span></p>
+      <p class="sp-loading-sub">Fetching transcript &amp; analyzing content</p>
+    </div>
+
+    <!-- Error State -->
+    <div class="sp-error-card" id="error-state" style="display:none;">
+      <div class="sp-error-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+      </div>
+      <div class="sp-error-body">
+        <p class="sp-error-title" id="error-title">Something went wrong</p>
+        <p class="sp-error-msg" id="error-msg">Please try again.</p>
+      </div>
+    </div>
+
+    <!-- Not On YouTube State -->
+    <div class="sp-no-yt" id="not-yt-state" style="display:none;">
+      <div class="sp-no-yt-icon">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22.54 6.42a2.78 2.78 0 0 0-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46A2.78 2.78 0 0 0 1.46 6.42 29 29 0 0 0 1 12a29 29 0 0 0 .46 5.58 2.78 2.78 0 0 0 1.95 1.96C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 0 0 1.95-1.96A29 29 0 0 0 23 12a29 29 0 0 0-.46-5.58z"/>
+          <polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02"/>
+        </svg>
+      </div>
+      <p class="sp-no-yt-title">Open a YouTube video</p>
+      <p class="sp-no-yt-sub">Switch to a YouTube tab to summarize a video or continue chatting.</p>
+    </div>
+
+    <!-- Summary Result Card -->
+    <section class="sp-result" id="result-section" style="display:none;">
+
+      <!-- ── Tab bar (Summary / Chat) ── -->
+      <div class="sp-tabs" id="sp-tabs">
+        <button class="sp-tab sp-tab--active" id="tab-summary">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>
+          Summary
+        </button>
+        <button class="sp-tab" id="tab-chat">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          Chat
+        </button>
+      </div>
+
+      <!-- ── Summary Panel ── -->
+      <div id="summary-panel">
+        <div class="sp-result-header">
+          <div class="sp-result-title-row">
+            <div class="sp-result-badge">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
+              </svg>
+              AI Summary
+            </div>
+            <button class="sp-copy-btn" id="copy-btn" title="Copy summary">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+              Copy
+            </button>
+          </div>
+        </div>
+        <div class="sp-summary-body" id="summary-content">
+          <!-- Populated by sidepanel.js -->
+        </div>
+      </div>
+
+      <!-- ── Chat Panel ── -->
+      <div id="chat-panel" style="display:none;">
+        <div class="sp-chat-msgs" id="chat-messages">
+          <!-- Intro message injected by JS -->
+        </div>
+        <div class="sp-chat-input-bar">
+          <textarea
+            id="chat-input"
+            class="sp-chat-textarea"
+            placeholder="Ask anything about this video…"
+            rows="1"
+            maxlength="1000"
+          ></textarea>
+          <button class="sp-chat-send" id="chat-send-btn" title="Send">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- ─── FOOTER ──────────────────────────────────────────────────────── -->
+  <footer class="sp-footer">
+    <span class="sp-footer-brand">Brieflytube AI</span>
+  </footer>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

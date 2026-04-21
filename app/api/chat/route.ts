@@ -17,7 +17,15 @@ import { authenticateRequest } from "@/lib/apiAuth";
 import { callWithFallback } from "@/lib/llmChain";
 
 const EMBED_MODEL = "gemini-embedding-001"; // 3072-dim, confirmed working
-const TOP_K       = 5;                      // number of chunks to retrieve
+const TOP_K       = 5;                      // default chunks to retrieve
+const TOP_K_TIME  = 10;                     // expanded retrieval for temporal queries
+
+// Casual messages that should NOT trigger video RAG lookup
+const GREETING_RE = /^(hey+|hi+|hello|sup|hiya|howdy|yo+|heya|good (morning|afternoon|evening)|thanks?|thank you|thx|ty|ok(ay)?|sure|cool|nice|great|awesome|lol|haha|👋)[!.? ]*$/i;
+
+// Temporal references like "after 5 mins", "at 10:30", "5 minutes in"
+const TIME_RE = /\b(\d+)\s*(min(ute)?s?|hr?s?|hour|sec(ond)?s?)\s*(in|into|after|at|mark|later)|\bat\s+\d+:\d+|\bfirst\s+\d+\s*min|\blast\s+\d+\s*min/i;
+
 
 // ── Embed the user's query ────────────────────────────────────────────────────
 async function embedQuery(text: string, apiKey: string): Promise<number[]> {
@@ -97,7 +105,26 @@ export async function POST(req: NextRequest) {
   // Run everything in the background so we can return the stream immediately
   (async () => {
     try {
-      // 2. Embed the user's question
+      // ── Greeting / small-talk short-circuit ──────────────────────────────
+      // Don't inject video context for casual openers like "hey", "thanks", etc.
+      if (GREETING_RE.test(message.trim())) {
+        const reply = /thanks?|thank you|thx|ty/i.test(message)
+          ? "Happy to help! Got any other questions about the video?"
+          : /ok(ay)?|sure/i.test(message)
+          ? "Sure! Feel free to ask anything about the video."
+          : /cool|nice|great|awesome/i.test(message)
+          ? "Glad that helped! Anything else you'd like to know?"
+          : "Hey! Ask me anything about this video and I'll help you out. 🎬";
+        await write({ type: "chunk", text: reply });
+        await write({ type: "done" });
+        return;
+      }
+
+      // ── Detect temporal queries ("after 5 mins", "at 10:30", etc.) ──────
+      const isTemporalQuery = TIME_RE.test(message);
+      const effectiveTopK   = isTemporalQuery ? TOP_K_TIME : TOP_K;
+
+      // ── Embed the user's question ─────────────────────────────────────────
       let queryEmbedding: number[];
       try {
         queryEmbedding = await embedQuery(message, apiKey);
@@ -109,8 +136,7 @@ export async function POST(req: NextRequest) {
 
       const vectorStr = `[${queryEmbedding.join(",")}]`;
 
-      // 3. Cosine similarity search using pgvector's <=> (cosine distance) operator
-      //    We scope by videoId AND userId so users only see their own data
+      // ── Cosine similarity search via pgvector ────────────────────────────
       type ChunkRow = { text: string; chunkIndex: number; similarity: number };
 
       const chunks = await prisma.$queryRaw<ChunkRow[]>`
@@ -123,7 +149,7 @@ export async function POST(req: NextRequest) {
           "videoId" = ${videoId}
           AND "userId" = ${auth.userId}
         ORDER BY embedding <=> ${vectorStr}::vector
-        LIMIT ${TOP_K}
+        LIMIT ${effectiveTopK}
       `;
 
       if (chunks.length === 0) {
@@ -134,28 +160,36 @@ export async function POST(req: NextRequest) {
         return;
       }
 
-      // 4. Build context — plain text blocks, no labels that can leak into LLM output
+      // ── Low-similarity detection ─────────────────────────────────────────
+      const topSimilarity = chunks[0]?.similarity ?? 0;
+      const lowConfidence = topSimilarity < 0.35;
+
+      // ── Build context — plain text blocks ────────────────────────────────
       const context = chunks
         .map(c => c.text.trim())
         .join("\n\n---\n\n");
 
       console.log(
-        "[Chat] %d chunks retrieved for videoId=%s (top similarity=%.2f)",
-        chunks.length,
-        videoId,
-        chunks[0]?.similarity ?? 0
+        "[Chat] %d chunks retrieved for videoId=%s (top similarity=%.2f, temporal=%s)",
+        chunks.length, videoId, topSimilarity, isTemporalQuery
       );
 
-      // 5. System prompt — LLM speaks as if it personally watched the video.
-      //    Forbidden words prevent implementation details from leaking to the user.
+      // ── System prompt — LLM responds as if it personally watched the video ─
+      const temporalHint = isTemporalQuery
+        ? "\n6. For questions about specific timestamps or time positions: the video content below represents sections of the video. If you can identify relevant moments, describe them. If the exact moment isn't clear, say you don't recall the exact timing but share what you do know."
+        : "";
+      const confidenceHint = lowConfidence
+        ? "\n7. The user may be asking about something very specific or niche. If you cannot find a clear answer in the content below, be honest: say you're not sure or that part wasn't very detailed in the video."
+        : "";
+
       const systemPrompt = `You are a knowledgeable AI assistant who has thoroughly watched and understood a YouTube video. Your job is to answer questions about it naturally and helpfully.
 
 CRITICAL RULES — follow without exception:
-1. Speak as if you personally watched the video. NEVER use the words "transcript", "excerpt", "chunk", "context", "passage", "according to", "based on", "the text says", or any phrase that suggests you are reading extracted text.
-2. If the answer is available in the video content provided below, answer directly and confidently in your own words.
-3. If the information is not covered, say something like: "That wasn't covered in the video" or "I didn't catch that part."
-4. Keep answers concise and conversational. Aim for 2–4 sentences unless a detailed question warrants more.
-5. Do not start with filler phrases like "Certainly!", "Sure!", "Great question!", or "Of course!".
+1. Speak as if you personally watched the video. NEVER use the words "transcript", "excerpt", "chunk", "context", "passage", "according to", "based on", or any phrase that suggests you are reading text.
+2. If the answer is in the video content below, answer directly and confidently in your own words.
+3. If the information is not covered, say: "That part wasn't covered in the video" or "I don't recall that being mentioned."
+4. Keep answers concise and conversational. 2–4 sentences unless the question needs more detail.
+5. Do not start with filler like "Certainly!", "Sure!", "Great question!", or "Of course!".${temporalHint}${confidenceHint}
 
 VIDEO CONTENT:
 ${context}`;
