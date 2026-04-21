@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="extension/icons/icon128.png" alt="Brieflytube AI Logo" width="90" />
+<img src="https://raw.githubusercontent.com/aryan2022-bit/Brieflytube-AI/main/extension/icons/icon128.png" alt="Brieflytube AI Logo" width="90" />
 
 # Brieflytube AI
 
