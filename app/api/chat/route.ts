@@ -20,8 +20,27 @@ const EMBED_MODEL = "gemini-embedding-001"; // 3072-dim, confirmed working
 const TOP_K       = 5;                      // default chunks to retrieve
 const TOP_K_TIME  = 10;                     // expanded retrieval for temporal queries
 
-// Casual messages that should NOT trigger video RAG lookup
-const GREETING_RE = /^(hey+|hi+|hello|sup|hiya|howdy|yo+|heya|good (morning|afternoon|evening)|thanks?|thank you|thx|ty|ok(ay)?|sure|cool|nice|great|awesome|lol|haha|👋)[!.? ]*$/i;
+// Casual / small-talk messages that should NOT trigger video RAG lookup.
+// Matches greetings, filler words, casual questions about AI identity, etc.
+const GREETING_RE = new RegExp(
+  ["^",
+   "(",
+   "hey+|hi+|hello|hiya|howdy|yo+|heya|hola",
+   "|sup|what'?s\\s+up|wassup|wazzup|wyd|how'?s\\s+it\\s+going|how'?s\\s+life|how'?s\\s+things",
+   "|how\\s+are\\s+(you|u|ya|yall)|how\\s+r\\s+u|how\\s+do\\s+you\\s+do",
+   "|i'?m\\s+(good|fine|ok(ay)?|great|doing\\s+(good|fine|well|ok(ay)?))",
+   "|doing\\s+(good|fine|ok(ay)?|well)",
+   "|good\\s*(morning|afternoon|evening|day|night)",
+   "|thanks?|thank\\s*you|thx|ty|np|no\\s*prob(lem)?",
+   "|ok(ay)?|sure|cool|nice|great|awesome|lol|haha|hehe|lmao|rofl",
+   "|who\\s+are\\s+you|what\\s+are\\s+you|are\\s+you\\s+an?\\s+ai|are\\s+you\\s+a\\s+bot",
+   "|tell\\s+me\\s+about\\s+your(self)?|what\\s+can\\s+you\\s+do|what\\s+do\\s+you\\s+do",
+   "|👋|🙋|😊|🤝|✌️|🙏",
+   ")",
+   "[!.?,\\s]*$"
+  ].join(""),
+  "i"
+);
 
 // Temporal references like "after 5 mins", "at 10:30", "5 minutes in"
 const TIME_RE = /\b(\d+)\s*(min(ute)?s?|hr?s?|hour|sec(ond)?s?)\s*(in|into|after|at|mark|later)|\bat\s+\d+:\d+|\bfirst\s+\d+\s*min|\blast\s+\d+\s*min/i;
@@ -113,16 +132,30 @@ export async function POST(req: NextRequest) {
   // Run everything in the background so we can return the stream immediately
   (async () => {
     try {
-      // ── Greeting / small-talk short-circuit ──────────────────────────────
-      // Don't inject video context for casual openers like "hey", "thanks", etc.
+      // ── Greeting / small-talk / identity short-circuit ───────────────────
+      // Don't inject video context for casual messages — respond as Brieflytube AI persona
       if (GREETING_RE.test(message.trim())) {
-        const reply = /thanks?|thank you|thx|ty/i.test(message)
-          ? "Happy to help! Got any other questions about the video?"
-          : /ok(ay)?|sure/i.test(message)
-          ? "Sure! Feel free to ask anything about the video."
-          : /cool|nice|great|awesome/i.test(message)
-          ? "Glad that helped! Anything else you'd like to know?"
-          : "Hey! Ask me anything about this video and I'll help you out. 🎬";
+        const msg = message.trim().toLowerCase();
+        let reply: string;
+        if (/thanks?|thank\s*you|thx|^ty$/i.test(msg)) {
+          reply = "Happy to help! Got any other questions about the video? 😊";
+        } else if (/ok(ay)?|^sure$|^np$|no\s*prob/i.test(msg)) {
+          reply = "Sure thing! Ask me anything about the video.";
+        } else if (/cool|nice|great|awesome/i.test(msg)) {
+          reply = "Glad that helped! Anything else you'd like to know?";
+        } else if (/how\s+are|how'?s\s+it|how\s+r\s+u|doing\s+(good|fine|well|ok)/i.test(msg)) {
+          reply = "I'm Brieflytube AI — doing great and ready to answer your questions! What would you like to know about the video? 🎬";
+        } else if (/who\s+are\s+you|what\s+are\s+you|are\s+you\s+(a[n]?\s+)?(ai|bot)|tell\s+me\s+about\s+your/i.test(msg)) {
+          reply = "I'm Brieflytube AI, your video assistant! I watch and understand YouTube videos so you can ask me anything about them. What would you like to know?";
+        } else if (/what\s+(can|do)\s+you\s+do/i.test(msg)) {
+          reply = "I can answer any question about this video — key points, specific moments, explanations, details, you name it. Just ask! 💬";
+        } else if (/lol|haha|hehe|lmao|rofl/i.test(msg)) {
+          reply = "😄 Anyway, got any questions about the video?";
+        } else if (/what'?s\s+up|wassup|wazzup|wyd|sup/i.test(msg)) {
+          reply = "Just here watching this video with you! Go ahead and ask me anything about it. 🎬";
+        } else {
+          reply = "Hey! Ask me anything about this video and I'll help you out. 🎬";
+        }
         await write({ type: "chunk", text: reply });
         await write({ type: "done" });
         return;
@@ -197,12 +230,15 @@ export async function POST(req: NextRequest) {
             .join("\n")}\n\nNow respond to the latest message:`
         : "";
 
-      const systemPrompt = `You are a knowledgeable AI assistant who has thoroughly watched and understood a YouTube video. Your job is to answer questions about it naturally and helpfully.
+      const systemPrompt = `You are Brieflytube AI — a friendly, knowledgeable video assistant who has personally watched and fully understood this YouTube video.
+
+IDENTITY (highest priority — non-negotiable):
+0. You are "Brieflytube AI". You are NEVER "a large language model", "an AI model", "an AI assistant", "designed to", or any generic AI label. NEVER say phrases like "I have processed the content", "I am designed to be helpful", "I am a language model". If asked what you are, say: "I'm Brieflytube AI, your video assistant!"
 
 CRITICAL RULES — follow without exception:
 1. Speak as if you personally watched the video. NEVER use the words "transcript", "excerpt", "chunk", "context", "passage", "according to", "based on", or any phrase that suggests you are reading text.
 2. If the answer is in the video content below, answer directly and confidently in your own words.
-3. If the information is not covered, say: "That part wasn't covered in the video" or "I don't recall that being mentioned."
+3. If the information is not covered, say: "That part wasn't covered in the video" or "I don't recall it coming up."
 4. Keep answers concise and conversational. 2–4 sentences unless the question needs more detail.
 5. Do not start with filler like "Certainly!", "Sure!", "Great question!", or "Of course!".${temporalHint}${confidenceHint}${historyBlock}
 
