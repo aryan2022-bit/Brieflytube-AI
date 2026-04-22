@@ -302,7 +302,7 @@ export async function POST(req: NextRequest) {
             const p = spawn("yt-dlp", ["--dump-json", url]);
             let out = "";
             p.stdout.on("data", (d) => (out += d.toString()));
-            p.on("close", (code) => code === 0 ? resolve(out) : reject(new Error(`yt-dlp failed (code ${code})`)));
+            p.on("close", (code) => { if ((code === 0 || code === 1) && out.trim()) { resolve(out); } else { reject(new Error("yt-dlp failed, code: " + code)); } });
             p.on("error", (err) => reject(new Error(`yt-dlp not found: ${err.message}`)));
           });
 
@@ -313,11 +313,14 @@ export async function POST(req: NextRequest) {
 
           const manualSubs = info.subtitles ?? {};
           const autoCaps   = info.automatic_captions ?? {};
+          const allManualLangs = Object.keys(manualSubs);
+          const allAutoLangs   = Object.keys(autoCaps);
+          // Try: en (manual) -> en-US (manual) -> any-en-prefix (manual) -> en (auto) -> en-US (auto) -> any-en-prefix (auto) -> first available
           const subFormats =
-            manualSubs["en"] ?? autoCaps["en"] ??
-            (Object.keys(manualSubs)[0] ? manualSubs[Object.keys(manualSubs)[0]] : null) ??
-            (Object.keys(autoCaps)[0]   ? autoCaps[Object.keys(autoCaps)[0]]   : null);
-
+            manualSubs["en"]    ?? manualSubs["en-US"]    ?? (allManualLangs.find(l => l.startsWith("en")) ? manualSubs[allManualLangs.find(l => l.startsWith("en"))] : null) ??
+            autoCaps["en"]      ?? autoCaps["en-US"]      ?? (allAutoLangs.find(l => l.startsWith("en")) ? autoCaps[allAutoLangs.find(l => l.startsWith("en"))] : null) ??
+            (allManualLangs.length ? manualSubs[allManualLangs[0]] : null) ??
+            (allAutoLangs.length   ? autoCaps[allAutoLangs[0]]   : null);
           if (!subFormats || subFormats.length === 0) throw new Error("No subtitle tracks found");
 
           const fmt = subFormats.find((s) => s.ext === "json3") ??
