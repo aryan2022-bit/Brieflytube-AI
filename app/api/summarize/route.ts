@@ -299,7 +299,7 @@ export async function POST(req: NextRequest) {
           await writeProgress({ type: "progress", stage: "fetching_transcript", message: "Fetching subtitles via yt-dlp..." });
 
           const infoStr = await new Promise((resolve, reject) => {
-            const p = spawn("yt-dlp", ["--dump-json", url]);
+            const p = spawn("yt-dlp", ["--dump-json", url], { shell: true, windowsHide: true });
             let out = "";
             p.stdout.on("data", (d) => (out += d.toString()));
             p.on("close", (code) => { if ((code === 0 || code === 1) && out.trim()) { resolve(out); } else { reject(new Error("yt-dlp failed, code: " + code)); } });
@@ -366,7 +366,7 @@ export async function POST(req: NextRequest) {
           let videoInfo = ytDlpVideoInfo;
           if (!videoInfo) {
             const infoStr2 = await new Promise((resolve, reject) => {
-              const p = spawn("yt-dlp", ["--dump-json", url]);
+              const p = spawn("yt-dlp", ["--dump-json", url], { shell: true, windowsHide: true });
               let out = "";
               p.stdout.on("data", (d) => (out += d.toString()));
               p.on("close", (code) => code === 0 ? resolve(out) : reject(new Error(`yt-dlp metadata failed (code ${code})`)));
@@ -387,7 +387,7 @@ export async function POST(req: NextRequest) {
           await writeProgress({ type: "progress", stage: "fetching_transcript", message: "Downloading audio track..." });
           const fullAudioFile = path.join(os.tmpdir(), `full-audio-${Date.now()}.m4a`);
           await new Promise<void>((resolve, reject) => {
-            const p = spawn("yt-dlp", ["--ffmpeg-location", ffmpegPath, "-f", "bestaudio[ext=m4a]/bestaudio", "--force-overwrites", "-o", fullAudioFile, url], { stdio: "ignore" });
+            const p = spawn("yt-dlp", ["--ffmpeg-location", ffmpegPath, "-f", "bestaudio[ext=m4a]/bestaudio", "--force-overwrites", "-o", fullAudioFile, url], { shell: true, windowsHide: true, stdio: "ignore" });
             p.on("close", (c) => c === 0 ? resolve() : reject(new Error(`yt-dlp failed (code ${c})`)));
             p.on("error", reject);
           });
@@ -412,7 +412,7 @@ export async function POST(req: NextRequest) {
               const chunkFile = path.join(os.tmpdir(), `chunk-${Date.now()}-${i}.m4a`);
               await writeProgress({ type: "progress", stage: "fetching_transcript", message: `Transcribing audio chunk ${i + 1}/${n}...` });
               await new Promise<void>((resolve, reject) => {
-                const ff = spawn(ffmpegPath, ["-i", fullAudioFile, "-ss", (i * CHUNK).toString(), "-t", CHUNK.toString(), "-c", "copy", chunkFile], { stdio: "ignore" });
+                const ff = spawn(ffmpegPath, ["-i", fullAudioFile, "-ss", (i * CHUNK).toString(), "-t", CHUNK.toString(), "-c", "copy", chunkFile], { shell: true, windowsHide: true, stdio: "ignore" });
                 ff.on("close", (c) => c === 0 ? resolve() : reject(new Error(`ffmpeg failed (code ${c})`)));
                 ff.on("error", reject);
               });
