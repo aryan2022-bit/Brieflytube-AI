@@ -14,7 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authenticateRequest } from "@/lib/apiAuth";
-import { callWithFallback } from "@/lib/llmChain";
+import { callWithFallback, LlmRateLimitError } from "@/lib/llmChain";
 
 const EMBED_MODEL = "gemini-embedding-001"; // 3072-dim, confirmed working
 const TOP_K       = 5;                      // default chunks to retrieve
@@ -259,8 +259,27 @@ ${context}`;
 
       await write({ type: "done" });
     } catch (err) {
-      console.error("[Chat] Unhandled error:", err);
-      await write({ type: "error", error: "An unexpected error occurred. Please try again." });
+      const isRateLimit = (err && (err as any).name === 'LlmRateLimitError') ||
+        (err instanceof Error && (
+          err.message.toLowerCase().includes('rate limit') ||
+          err.message.toLowerCase().includes('rate-limit') ||
+          err.message.includes('1302') ||
+          err.message.includes('429')
+        ));
+
+      if (isRateLimit) {
+        console.warn("[Chat] Rate limit hit:", err instanceof Error ? err.message : String(err));
+        await write({
+          type: "error",
+          error: "The AI is processing too many requests right now. Please wait a few seconds and try again.",
+        });
+      } else {
+        console.error("[Chat] Unhandled error:", err);
+        await write({
+          type: "error",
+          error: err instanceof Error ? err.message : "An unexpected error occurred. Please try again.",
+        });
+      }
     } finally {
       await writer.close().catch(() => {});
     }

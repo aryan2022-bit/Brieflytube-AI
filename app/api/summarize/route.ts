@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { extractVideoId } from "@/lib/youtube";
 import { spawn } from "child_process";
@@ -654,10 +654,18 @@ export async function POST(req: NextRequest) {
       let errorMessage = "Failed to generate summary";
       let errorDetails: string | undefined;
 
-      if (error instanceof LlmRateLimitError) {
-        errorMessage = error.message;
-        errorDetails = error.retryAfterMs
-          ? `Suggested retry after ${Math.ceil(error.retryAfterMs / 1000)}s`
+      const isRateLimit = (error && (error as any).name === 'LlmRateLimitError') ||
+        (error instanceof Error && (
+          error.message.toLowerCase().includes('rate limit') ||
+          error.message.toLowerCase().includes('rate-limit') ||
+          error.message.includes('1302') ||
+          error.message.includes('429')
+        ));
+
+      if (isRateLimit) {
+        errorMessage = error instanceof Error ? error.message : "The AI provider is temporarily rate-limiting requests. Please wait a moment and try again.";
+        errorDetails = (error as any).retryAfterMs
+          ? `Suggested retry after ${Math.ceil((error as any).retryAfterMs / 1000)}s`
           : "The configured AI provider rejected the request because of rate limits.";
       } else if (error instanceof Error) {
         errorMessage = error.message;
