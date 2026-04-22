@@ -269,9 +269,16 @@ export async function POST(req: NextRequest) {
       let hasTimestamps = true;
 
       try {
-        transcriptResult = await YoutubeTranscript.fetchTranscript(url);
+        // Always use the clean videoId — extra URL params (playlist, si=, etc.)
+        // can confuse the youtube-transcript library and cause false failures.
+        try {
+          transcriptResult = await YoutubeTranscript.fetchTranscript(videoId);
+        } catch {
+          // Retry with explicit English lang — catches most bot-detection false-negatives
+          transcriptResult = await YoutubeTranscript.fetchTranscript(videoId, { lang: "en" });
+        }
       } catch (error) {
-        console.error("Transcript fetch failed:", error);
+        console.error("Transcript fetch failed (both attempts):", error);
         console.log("TRIGGERED AUDIO FALLBACK WITH GROQ");
         
         await writeProgress({
@@ -299,8 +306,9 @@ export async function POST(req: NextRequest) {
           const durationSeconds = videoInfo.duration || 0;
           let fullTranscript = "";
           
-          // Path to the ffmpeg internal binary we installed
-          const ffmpegPath = require("path").resolve(process.cwd(), "node_modules", "ffmpeg-static", "ffmpeg.exe");
+          // Path to the ffmpeg binary (ffmpeg-static resolves the correct OS binary)
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const ffmpegPath: string = require("ffmpeg-static") as string;
           const os = require("os");
           const fs = require("fs");
           const path = require("path");
@@ -402,10 +410,19 @@ export async function POST(req: NextRequest) {
         } catch (fallbackError) {
           const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
           console.error("Audio fallback failed:", fallbackMsg);
+
+          // Distinguish system/install errors from actual missing transcript.
+          // ENOENT → yt-dlp isn't installed. Network/auth → transient failure.
+          // In both cases the user should RETRY, not be told "no transcript exists".
+          const isSystemError = fallbackMsg.includes("ENOENT") || fallbackMsg.includes("yt-dlp");
+          const userMessage = isSystemError
+            ? "Couldn't fetch this video's transcript — please try again in a moment."
+            : "No captions or audio track could be found for this video.";
+
           await writeProgress({
             type: "error",
-            error: "No transcript available for this video",
-            details: `Audio transcription fallback also failed: ${fallbackMsg}`,
+            error: userMessage,
+            details: `Fallback failure: ${fallbackMsg}`,
           });
           await writer.close();
           return;

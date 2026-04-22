@@ -155,20 +155,13 @@ function showResult(html) {
   resultSection.style.display = 'block';
   summaryContent.innerHTML    = html;
 
-  // Always land on the Summary tab when a (new) result arrives
-  const sp = document.getElementById('summary-panel');
-  const cp = document.getElementById('chat-panel');
-  const tS = document.getElementById('tab-summary');
-  const tC = document.getElementById('tab-chat');
-  if (sp) sp.style.display = '';
-  if (cp) { cp.style.display = 'none'; cp.style.flexDirection = ''; }
-  if (tS) tS.classList.add('sp-tab--active');
-  if (tC) tC.classList.remove('sp-tab--active');
+  // Always land on the Summary tab when a result arrives
+  switchToTab('summary');
 
   setStatus('ready');
   resetButton();
 
-  // Step 5 hook: make timestamps clickable
+  // Make timestamps clickable
   makeTimestampsClickable();
 }
 
@@ -651,17 +644,27 @@ summarizeBtn.addEventListener('click', async () => {
               injectTopicTimestamps(topics);
             }
 
-            // ── Enable Chat tab for this video ──────────────────────────
+            // ── Enable Chat tab for this video ─────────────────────────────
             if (summary.videoId) {
               initChat(summary.videoId);
             }
 
+            // Persist summary including videoId so chat can be re-enabled on restore
             chrome.storage.local.set({
-              lastSummary: { html: summaryContent.innerHTML, url: currentVideoUrl, timestamp: Date.now() },
+              lastSummary: {
+                html:      summaryContent.innerHTML,
+                url:       currentVideoUrl,
+                videoId:   summary.videoId || '',
+                timestamp: Date.now(),
+              },
             });
 
           } else if (event.type === 'error') {
-            const msg = (event.error || 'An error occurred').toString();
+            const msg   = (event.error || 'An error occurred').toString();
+            const isRetryable = msg.toLowerCase().includes("try again") ||
+                                msg.toLowerCase().includes("couldn't fetch") ||
+                                msg.toLowerCase().includes("temporarily");
+
             if (
               msg.toLowerCase().includes('429') ||
               msg.toLowerCase().includes('balance') ||
@@ -670,15 +673,25 @@ summarizeBtn.addEventListener('click', async () => {
               msg.toLowerCase().includes('rate limit')
             ) {
               showError('⚠️ API Credits Exhausted', 'Your API balance is insufficient. Please top up your credits.');
+
+            } else if (isRetryable) {
+              // Transient error (bot detection, network, yt-dlp not installed) — encourage retry
+              showError(
+                '🔄 Transcript Fetch Failed',
+                msg + ' YouTube may have temporarily blocked the request. Please wait a moment and try again.'
+              );
+
             } else if (
-              msg.toLowerCase().includes('transcript') ||
-              msg.toLowerCase().includes('caption') ||
+              msg.toLowerCase().includes('no captions') ||
+              msg.toLowerCase().includes('no audio track') ||
               msg.toLowerCase().includes('no transcript')
             ) {
+              // Genuine: video has no captions or audio we can transcribe
               showError(
                 '📄 No Transcript Available',
-                'This video has no captions or subtitles. Try a video that has auto-generated or manual captions enabled.'
+                'This video has no captions or subtitles and audio transcription failed. Try a video with auto-generated or manual captions enabled.'
               );
+
             } else {
               showError('Summary Failed', msg);
             }
@@ -763,13 +776,17 @@ chrome.storage.local.get(['lastYouTubeUrl', 'lastSummary'], (result) => {
     currentVideoUrl = result.lastYouTubeUrl;
     setUrlValid(true);
   }
-  // Optionally restore the last summary only if it directly matches the currently opened video
+  // Restore the last summary only if it matches the current video and is fresh
   if (
-    result.lastSummary && 
+    result.lastSummary &&
     result.lastSummary.url === currentVideoUrl &&
     Date.now() - result.lastSummary.timestamp < 10 * 60 * 1000
   ) {
     showResult(result.lastSummary.html);
+    // Re-enable chat for this video — videoId is now saved alongside the summary
+    if (result.lastSummary.videoId) {
+      initChat(result.lastSummary.videoId);
+    }
   }
 });
 
