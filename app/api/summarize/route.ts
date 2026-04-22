@@ -280,6 +280,7 @@ export async function POST(req: NextRequest) {
         try {
           transcriptResult = await YoutubeTranscript.fetchTranscript(videoId);
           console.log("[Transcript] âœ… Tier 1 (youtube-transcript) succeeded");
+          console.log("[Transcript] Tier 1 returned", Array.isArray(transcriptResult) ? transcriptResult.length + " segs" : "str:" + String(transcriptResult).length);
         } catch {
           transcriptResult = await YoutubeTranscript.fetchTranscript(videoId, { lang: "en" });
           console.log("[Transcript] âœ… Tier 1 lang=en retry succeeded");
@@ -293,7 +294,9 @@ export async function POST(req: NextRequest) {
       // It extracts the direct subtitle URL so we can fetch captions without audio.
       // We cache the metadata so Tier 3 can reuse it without a second yt-dlp call.
       let ytDlpVideoInfo = null;
-      if (!transcriptResult) {
+      // noUsableTranscript: returns true for undefined, empty array [], or empty string
+      const noUsableTranscript = (t) => !t || (Array.isArray(t) && t.length === 0) || (typeof t === "string" && !t.trim());
+      if (noUsableTranscript(transcriptResult)) {
         try {
           console.log("[Transcript] Trying Tier 2 (yt-dlp subtitle extraction)...");
           await writeProgress({ type: "progress", stage: "fetching_transcript", message: "Fetching subtitles via yt-dlp..." });
@@ -357,7 +360,7 @@ export async function POST(req: NextRequest) {
       }
 
       // â”€â”€ Tier 3: yt-dlp + Groq Whisper (for videos with no captions) â”€â”€â”€â”€
-      if (!transcriptResult) {
+      if (noUsableTranscript(transcriptResult)) {
         console.log("[Transcript] Trying Tier 3 (yt-dlp + Groq audio)...");
         await writeProgress({ type: "progress", stage: "fetching_transcript", message: "No captions found â€” transcribing audio directly..." });
 
@@ -446,10 +449,10 @@ export async function POST(req: NextRequest) {
 
       // â”€â”€ Guard: some videos return null/empty content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (
-        transcriptContent == null ||
-        (Array.isArray(transcriptContent) && transcriptContent.length === 0) ||
-        (typeof transcriptContent === "string" && transcriptContent.trim().length === 0)
-      ) {
+      if (noUsableTranscript(transcriptContent)) {
+
+
+
         await writeProgress({
           type: "error",
           error: "No transcript available for this video",
