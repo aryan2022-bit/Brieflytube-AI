@@ -288,53 +288,68 @@ export async function POST(req: NextRequest) {
         console.warn("[Transcript] âš ï¸ Tier 1 failed:", t1Err instanceof Error ? t1Err.message : t1Err);
       }
 
-      // â”€â”€ Tier 2: ytdl-core caption timedtext API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-      // Fetches YouTube's own caption JSON endpoint. No external binaries needed.
-      // Works for any captioned video even when Tier 1 is bot-blocked.
+      // -- Tier 2: yt-dlp metadata -> subtitle URL -> direct HTTP fetch ----------
+      // yt-dlp is actively maintained and updated to bypass YouTube bot detection.
+      // It extracts the direct subtitle URL so we can fetch captions without audio.
+      // We cache the metadata so Tier 3 can reuse it without a second yt-dlp call.
+      let ytDlpVideoInfo = null;
       if (!transcriptResult) {
         try {
-          console.log("[Transcript] Trying Tier 2 (ytdl-core caption API)...");
-          await writeProgress({ type: "progress", stage: "fetching_transcript", message: "Fetching captions via alternate method..." });
+          console.log("[Transcript] Trying Tier 2 (yt-dlp subtitle extraction)...");
+          await writeProgress({ type: "progress", stage: "fetching_transcript", message: "Fetching subtitles via yt-dlp..." });
 
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const ytdl = require("@distube/ytdl-core");
-          const info = await ytdl.getInfo(`https://www.youtube.com/watch?v=${videoId}`);
+          const infoStr = await new Promise((resolve, reject) => {
+            const p = spawn("yt-dlp", ["--dump-json", url]);
+            let out = "";
+            p.stdout.on("data", (d) => (out += d.toString()));
+            p.on("close", (code) => code === 0 ? resolve(out) : reject(new Error(`yt-dlp failed (code ${code})`)));
+            p.on("error", (err) => reject(new Error(`yt-dlp not found: ${err.message}`)));
+          });
 
-          type CaptionTrack = { languageCode: string; baseUrl: string; name?: { simpleText: string } };
-          const captionTracks: CaptionTrack[] =
-            info.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
+          const info = JSON.parse(infoStr);
+          ytDlpVideoInfo = info;
 
-          if (!captionTracks.length) throw new Error("No caption tracks in metadata");
+          if (info.is_live) throw new Error("Cannot summarize active livestreams.");
 
-          const track =
-            captionTracks.find(t => t.languageCode === "en") ||
-            captionTracks.find(t => t.languageCode.startsWith("en")) ||
-            captionTracks[0];
+          const manualSubs = info.subtitles ?? {};
+          const autoCaps   = info.automatic_captions ?? {};
+          const subFormats =
+            manualSubs["en"] ?? autoCaps["en"] ??
+            (Object.keys(manualSubs)[0] ? manualSubs[Object.keys(manualSubs)[0]] : null) ??
+            (Object.keys(autoCaps)[0]   ? autoCaps[Object.keys(autoCaps)[0]]   : null);
 
-          console.log(`[Transcript] Caption track: lang=${track.languageCode}`);
+          if (!subFormats || subFormats.length === 0) throw new Error("No subtitle tracks found");
 
-          const captionRes = await fetch(`${track.baseUrl}&fmt=json3`);
-          if (!captionRes.ok) throw new Error(`Caption HTTP ${captionRes.status}`);
+          const fmt = subFormats.find((s) => s.ext === "json3") ??
+                      subFormats.find((s) => s.ext === "vtt")   ??
+                      subFormats[0];
 
-          type CaptionEvent = { tStartMs?: number; dDurationMs?: number; segs?: { utf8: string }[] };
-          const captionData = await captionRes.json() as { events?: CaptionEvent[] };
+          console.log(`[Transcript] Fetching subtitle ext=${fmt.ext}`);
+          const subRes = await fetch(fmt.url);
+          if (!subRes.ok) throw new Error(`Subtitle fetch HTTP ${subRes.status}`);
 
-          const segments = (captionData.events ?? [])
-            .filter(e => Array.isArray(e.segs) && e.segs.length > 0)
-            .map(e => ({
-              text:     (e.segs ?? []).map(s => s.utf8 ?? "").join("").replace(/\n/g, " ").trim(),
-              offset:   e.tStartMs   ?? 0,
-              duration: e.dDurationMs ?? 0,
-            }))
-            .filter(s => s.text.length > 0);
+          let segments;
+          if (fmt.ext === "json3") {
+            const data = await subRes.json();
+            segments = (data.events ?? [])
+              .filter((e) => Array.isArray(e.segs) && e.segs.length > 0)
+              .map((e) => ({
+                text:     (e.segs ?? []).map((s) => s.utf8 ?? "").join("").replace(/\n/g, " ").trim(),
+                offset:   e.tStartMs   ?? 0,
+                duration: e.dDurationMs ?? 0,
+              }))
+              .filter((s) => s.text.length > 0);
+          } else {
+            const vtt = await subRes.text();
+            segments = parseVttToSegments(vtt);
+          }
 
-          if (!segments.length) throw new Error("Caption data empty after parsing");
-
+          if (!segments.length) throw new Error("Subtitle data empty after parsing");
           transcriptResult = segments;
           hasTimestamps    = true;
-          console.log(`[Transcript] âœ… Tier 2 succeeded â€” ${segments.length} segments`);
+          console.log(`[Transcript] Tier 2 succeeded - ${segments.length} segments`);
         } catch (t2Err) {
-          console.warn("[Transcript] âš ï¸ Tier 2 failed:", t2Err instanceof Error ? t2Err.message : t2Err);
+          console.warn("[Transcript] Tier 2 failed:", t2Err instanceof Error ? t2Err.message : String(t2Err));
         }
       }
 
@@ -344,14 +359,18 @@ export async function POST(req: NextRequest) {
         await writeProgress({ type: "progress", stage: "fetching_transcript", message: "No captions found â€” transcribing audio directly..." });
 
         try {
-          const videoInfoStr = await new Promise<string>((resolve, reject) => {
-            const p = spawn("yt-dlp", ["--dump-json", url]);
-            let out = "";
-            p.stdout.on("data", (d) => (out += d));
-            p.on("close", (code) => code === 0 ? resolve(out) : reject(new Error("Metadata dump failed")));
-            p.on("error", reject);
-          });
-          const videoInfo = JSON.parse(videoInfoStr);
+          // Reuse cached metadata from Tier 2 if available (avoids double yt-dlp call)
+          let videoInfo = ytDlpVideoInfo;
+          if (!videoInfo) {
+            const infoStr2 = await new Promise((resolve, reject) => {
+              const p = spawn("yt-dlp", ["--dump-json", url]);
+              let out = "";
+              p.stdout.on("data", (d) => (out += d.toString()));
+              p.on("close", (code) => code === 0 ? resolve(out) : reject(new Error(`yt-dlp metadata failed (code ${code})`)));
+              p.on("error", (err) => reject(new Error(`yt-dlp not found: ${err.message}`)));
+            });
+            videoInfo = JSON.parse(infoStr2);
+          }
           if (videoInfo.is_live) throw new Error("Cannot summarize active livestreams.");
           const durationSeconds = videoInfo.duration || 0;
           let fullTranscript = "";
@@ -865,4 +884,43 @@ function formatTime(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+/** Parse a WebVTT subtitle file into transcript segments (offsets in milliseconds). */
+function parseVttToSegments(vtt: string): Array<{ text: string; offset: number; duration: number }> {
+  const segments: Array<{ text: string; offset: number; duration: number }> = [];
+  const toMs = (t: string): number => {
+    // Handle both "HH:MM:SS.mmm" and "MM:SS.mmm"
+    const clean = t.replace(",", ".");
+    const parts = clean.split(":");
+    let h = 0, m = 0, s = 0;
+    if (parts.length === 3) { h = +parts[0]; m = +parts[1]; s = +parts[2]; }
+    else if (parts.length === 2) { m = +parts[0]; s = +parts[1]; }
+    return Math.round((h * 3600 + m * 60 + s) * 1000);
+  };
+
+  const lines = vtt.split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length) {
+    const match = lines[i].match(/(\d{2}:[\d:]+[\d.,]+)\s*-->\s*(\d{2}:[\d:]+[\d.,]+)/);
+    if (match) {
+      const startMs = toMs(match[1]);
+      const endMs   = toMs(match[2]);
+      i++;
+      const textParts: string[] = [];
+      while (i < lines.length && lines[i].trim() !== "") {
+        // Strip VTT inline tags like <c>, <b>, timestamps, etc.
+        const cleaned = lines[i].replace(/<[^>]+>/g, "").trim();
+        if (cleaned) textParts.push(cleaned);
+        i++;
+      }
+      const text = textParts.join(" ").trim();
+      if (text) {
+        segments.push({ text, offset: startMs, duration: Math.max(0, endMs - startMs) });
+      }
+    } else {
+      i++;
+    }
+  }
+  return segments;
 }
