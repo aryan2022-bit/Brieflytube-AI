@@ -64,6 +64,14 @@ The product has two surfaces:
 | LLM (Summary & Chat) | **GLM-4.7 Flash** (ZAI API) | Text summarisation, Q&A answers |
 | Embedding Model | **gemini-embedding-001** (Google Gemini) | 3072-dim vector embeddings |
 | Vector Search | **pgvector** (PostgreSQL extension) | Cosine similarity search |
+| Audio Transcription | **Groq Whisper** (`whisper-large-v3`) | Tier 3 fallback: speech-to-text |
+
+### Transcript Pipeline (3-Tier Fallback)
+| Tier | Tool | Requires | When Used |
+|------|------|----------|-----------|
+| 1 | **youtube-transcript** (npm) | Nothing | Primary — fast, works most of the time |
+| 2 | **yt-dlp** subtitle URL fetch | `yt-dlp` in PATH | When Tier 1 is bot-blocked |
+| 3 | **yt-dlp** audio + **Groq Whisper** | `yt-dlp` + `GROQ_API_KEY` | Videos with no captions at all |
 
 ### Database & Storage
 | Component | Technology | Purpose |
@@ -78,53 +86,59 @@ The product has two surfaces:
 | Database Host | Supabase (AWS ap-southeast-1) |
 | Dev Server | `npm run dev` (Next.js) |
 | Extension | Chrome Extension Manifest V3 |
+| System Dependency | **yt-dlp** (`winget install yt-dlp.yt-dlp`) |
 
 ---
 
 ## 3. System Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         USER INTERFACES                             │
-│                                                                     │
-│   ┌──────────────────────┐        ┌────────────────────────────┐   │
-│   │  Chrome Extension     │        │   Next.js Web Dashboard    │   │
-│   │  (sidepanel.html/js)  │        │   (app/  — App Router)     │   │
-│   │                       │        │                            │   │
-│   │  • URL input          │        │  • /           (home)      │   │
-│   │  • Summary/Chat tabs  │        │  • /history    (summaries) │   │
-│   │  • Timestamp seek     │        │  • /dashboard  (stats)     │   │
-│   └──────────┬───────────┘        └──────────────┬─────────────┘   │
-│              │ HTTP (credentials:include)          │ HTTP            │
-└──────────────┼─────────────────────────────────────┼───────────────┘
-               │                                     │
-               ▼                                     ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                      NEXT.JS API LAYER                              │
-│                                                                     │
-│   /api/summarize   /api/chat   /api/history   /api/dashboard-stats  │
-│   /api/auth/*      /api/health /api/user/*    /api/proxy            │
-│                                                                     │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │                     lib/ (shared)                           │   │
-│   │  llmChain.ts │ ingestTranscriptChunks.ts │ prisma.ts │ glm  │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-└──────────────┬──────────────────────────────────────┬──────────────┘
-               │                                      │
-               ▼                                      ▼
-┌─────────────────────────┐            ┌──────────────────────────────┐
-│    EXTERNAL AI APIs     │            │    SUPABASE POSTGRESQL       │
-│                         │            │    (+ pgvector extension)    │
-│  ┌─────────────────┐    │            │                              │
-│  │ ZAI / GLM-4.7   │    │            │  Tables:                     │
-│  │ Flash (LLM)     │    │            │  • User, Account, Session    │
-│  └─────────────────┘    │            │  • Summary                   │
-│                         │            │  • Topic                     │
-│  ┌─────────────────┐    │            │  • TranscriptSegment         │
-│  │ Google Gemini   │    │            │  • TranscriptChunk (vector)  │
-│  │ embeddings API  │    │            │  • AppConfig, ApiUsageLog    │
-│  └─────────────────┘    │            │                              │
-└─────────────────────────┘            └──────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph UI["🖥️  User Interfaces"]
+        EXT["🔌 Chrome Extension\nsidepanel.html / js"]
+        WEB["🌐 Next.js Web Dashboard\nApp Router — /history, /dashboard"]
+    end
+
+    EXT -->|"HTTP + session cookie"| API
+    WEB -->|"HTTP"| API
+
+    subgraph API["⚡  Next.js API Layer"]
+        SUM["/api/summarize — SSE streaming"]
+        CHAT["/api/chat — RAG + SSE"]
+        HIST["/api/history + /api/dashboard-stats"]
+        AUTH["/api/auth/* — Better Auth"]
+    end
+
+    SUM --> TC
+    SUM -->|"LLM prompt"| GLM
+    CHAT -->|"embed query"| GEM
+    CHAT -->|"top-5 chunks + question"| GLM
+
+    subgraph TC["📝  3-Tier Transcript Pipeline"]
+        T1["Tier 1\nyoutube-transcript lib"]
+        T2["Tier 2\nyt-dlp subtitle URL"]
+        T3["Tier 3\nyt-dlp audio + Groq Whisper"]
+        T1 -->|fail| T2
+        T2 -->|fail| T3
+    end
+
+    subgraph AI["🤖  External AI APIs"]
+        GLM["GLM-4.7 Flash\nZAI API — LLM"]
+        GEM["gemini-embedding-001\nGoogle Gemini — 3072-dim"]
+        GRQ["Groq Whisper\naudio → text fallback"]
+    end
+
+    T3 --> GRQ
+
+    subgraph DB["🗄️  Supabase PostgreSQL + pgvector"]
+        TB1["Summary · Topic · TranscriptSegment"]
+        TB2["TranscriptChunk — vector(3072)"]
+    end
+
+    SUM -->|"save summary + topics"| TB1
+    SUM -.->|"fire-and-forget"| GEM
+    GEM -->|"float3072 → INSERT"| TB2
+    CHAT -->|"cosine similarity search"| TB2
 ```
 
 ---
@@ -206,7 +220,12 @@ Extension / Web App → POST /api/summarize
 │     └─ MISS → continue ↓               │
 │                                         │
 │  4. Fetch YouTube transcript            │
-│     (captions API → parse XML/JSON)     │
+│     3-Tier Fallback Chain:              │
+│     ① youtube-transcript lib           │
+│        └─ fail → ②                     │
+│     ② yt-dlp --dump-json → sub URL    │
+│        └─ fail → ③                     │
+│     ③ yt-dlp audio + Groq Whisper     │
 │                                         │
 │  5. Build LLM prompt with:              │
 │     • Transcript text                   │

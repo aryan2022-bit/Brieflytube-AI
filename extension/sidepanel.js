@@ -561,16 +561,21 @@ summarizeBtn.addEventListener('click', async () => {
     let streamingMarkdown = '';
     let isStreaming = false;
     let renderPending = false;
+    let pendingRafId = null;
+    let streamingComplete = false; // guards against RAF firing after complete event
 
     // Throttled renderer: avoids thrashing the DOM on every tiny chunk
     function scheduleRender() {
       if (renderPending) return;
       renderPending = true;
-      requestAnimationFrame(() => {
+      pendingRafId = requestAnimationFrame(() => {
         renderPending = false;
-        // Render with a blinking cursor appended so user sees live typing
-        summaryContent.innerHTML = markdownToHtml(streamingMarkdown) +
-          '<span class="sp-stream-cursor"></span>';
+        pendingRafId = null;
+        // Only append blinking cursor while streaming is still in progress
+        if (!streamingComplete) {
+          summaryContent.innerHTML = markdownToHtml(streamingMarkdown) +
+            '<span class="sp-stream-cursor"></span>';
+        }
       });
     }
 
@@ -623,6 +628,10 @@ summarizeBtn.addEventListener('click', async () => {
             scheduleRender();
 
           } else if (event.type === 'complete') {
+            // Cancel any pending RAF so the blinking cursor is never re-injected
+            streamingComplete = true;
+            if (pendingRafId !== null) { cancelAnimationFrame(pendingRafId); pendingRafId = null; }
+
             // Use the authoritative content from the server (may differ from streamed chunks)
             const summary  = event.summary || {};
             const topics   = Array.isArray(summary.topics) ? summary.topics : [];

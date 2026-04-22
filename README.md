@@ -38,36 +38,54 @@ It ships as two surfaces:
 - **📋 History Dashboard** — Every summary is saved, searchable, and grouped by video
 - **🔄 Smart Caching** — Instant re-load for previously summarized videos
 - **🌙 Dark / Light Mode** — Fully themed extension and dashboard
+- **🛡️ 3-Tier Transcript Fallback** — Never fails: youtube-transcript → yt-dlp subtitles → Groq Whisper audio transcription
 
 ---
 
 ## 🏗️ Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         USER INTERFACES                             │
-│                                                                     │
-│   ┌──────────────────────┐        ┌────────────────────────────┐   │
-│   │  Chrome Extension     │        │   Next.js Web Dashboard    │   │
-│   │  (sidepanel.html/js)  │        │   (App Router)             │   │
-│   └──────────┬───────────┘        └──────────────┬─────────────┘   │
-│              │ HTTP (session cookie)               │ HTTP            │
-└──────────────┼─────────────────────────────────────┼───────────────┘
-               ▼                                     ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                      NEXT.JS API LAYER                              │
-│   /api/summarize  ·  /api/chat  ·  /api/history  ·  /api/auth/*    │
-└──────────────┬──────────────────────────────────────┬──────────────┘
-               │                                      │
-               ▼                                      ▼
-┌─────────────────────────┐            ┌──────────────────────────────┐
-│    EXTERNAL AI APIs     │            │    SUPABASE POSTGRESQL       │
-│                         │            │    + pgvector extension      │
-│  • GLM-4.7 Flash (LLM)  │            │                              │
-│  • Gemini Embeddings    │            │  Summary · Topic · Transcript│
-│    (gemini-embedding-   │            │  Chunk (vector 3072-dim)     │
-│     001, 3072 dims)     │            │  User · Session · Auth       │
-└─────────────────────────┘            └──────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph UI["🖥️ User Interfaces"]
+        EXT["🔌 Chrome Extension\nsidepanel.html / js"]
+        WEB["🌐 Next.js Web Dashboard\nApp Router"]
+    end
+
+    EXT -->|"HTTP + session cookie"| API
+    WEB -->|"HTTP"| API
+
+    subgraph API["⚡ Next.js API Layer"]
+        SUM["/api/summarize — SSE"]
+        CHAT["/api/chat — RAG"]
+        HIST["/api/history"]
+    end
+
+    SUM --> TC
+    SUM -->|LLM| GLM
+    CHAT -->|embed| GEM
+    CHAT -->|LLM| GLM
+
+    subgraph TC["📝 3-Tier Transcript Pipeline"]
+        T1["① youtube-transcript"]
+        T2["② yt-dlp subtitles"]
+        T3["③ yt-dlp + Groq Whisper"]
+        T1 -->|fail| T2
+        T2 -->|fail| T3
+    end
+
+    subgraph DB["🗄️ Supabase PostgreSQL + pgvector"]
+        TB1["Summary · Topic · TranscriptSegment"]
+        TB2["TranscriptChunk vector(3072)"]
+    end
+
+    GLM["GLM-4.7 Flash — ZAI API"]
+    GEM["gemini-embedding-001"]
+    T3 --> GRQ["Groq Whisper"]
+
+    SUM -->|save| TB1
+    SUM -.->|fire-and-forget| GEM
+    GEM -->|embed + store| TB2
+    CHAT -->|cosine search| TB2
 ```
 
 ---
@@ -95,7 +113,15 @@ It ships as two surfaces:
 |-----------|-----------|
 | LLM (summaries & chat)  | **GLM-4.7 Flash** (ZAI API) |
 | Embedding model         | **gemini-embedding-001** (Google Gemini, free tier) |
+| Audio transcription     | **Groq Whisper** (`whisper-large-v3`, Tier 3 fallback) |
 | Vector search           | **pgvector** cosine similarity (`<=>` operator) |
+
+### Transcript Fallback Pipeline
+| Tier | Tool | When Active |
+|------|------|-------------|
+| 1 | **youtube-transcript** npm library | Primary — fast |
+| 2 | **yt-dlp** subtitle URL extraction | When Tier 1 is bot-blocked |
+| 3 | **yt-dlp** audio + **Groq Whisper** | Videos with no captions |
 
 ### Database
 | Component | Technology |
@@ -119,7 +145,12 @@ POST /api/summarize { url, language, model }
          │     ├─ HIT  → stream cached content instantly
          │     └─ MISS → continue ↓
          │
-         ├─► Fetch YouTube transcript (captions API)
+         ├─► 3-Tier Transcript Fallback
+         │     ① youtube-transcript lib (fast)
+         │        └─ fail → ②
+         │     ② yt-dlp --dump-json → subtitle URL → fetch
+         │        └─ fail → ③
+         │     ③ yt-dlp download audio → Groq Whisper STT
          │
          ├─► Build LLM prompt (transcript + language + rules)
          │
@@ -237,9 +268,19 @@ TranscriptChunk (
 
 ### Prerequisites
 - Node.js 20+
+- **yt-dlp** — required for the Tier 2/3 transcript fallback:
+  ```bash
+  # Windows
+  winget install yt-dlp.yt-dlp
+  # macOS
+  brew install yt-dlp
+  # Linux
+  pip install yt-dlp
+  ```
 - A [Supabase](https://supabase.com) project (free tier works)
 - A [ZAI / GLM](https://z.ai) API key
 - A [Google AI Studio](https://aistudio.google.com/app/apikey) API key (free)
+- A [Groq](https://console.groq.com) API key (free tier, for Tier 3 audio transcription)
 
 ### 1. Clone & Install
 
@@ -315,6 +356,7 @@ npm run dev
 | `BETTER_AUTH_URL` | ✅ | Base URL (`http://localhost:3000` in dev) |
 | `GLM_API_KEY` | ✅ | ZAI platform key for GLM-4.7 Flash |
 | `GEMINI_API_KEY` | ✅ | Google AI Studio key (free tier, `AIza...`) |
+| `GROQ_API_KEY` | ⚠️ | Groq key for Whisper audio transcription (Tier 3 fallback) |
 
 ---
 
