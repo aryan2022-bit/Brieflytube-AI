@@ -448,7 +448,7 @@ export async function POST(req: NextRequest) {
       const transcriptContent = transcriptResult;
 
       // â”€â”€ Guard: some videos return null/empty content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-      if (
+
       if (noUsableTranscript(transcriptContent)) {
 
 
