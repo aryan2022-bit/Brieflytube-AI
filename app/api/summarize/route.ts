@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { extractVideoId } from "@/lib/youtube";
 import { spawn } from "child_process";
@@ -17,7 +17,7 @@ import { ingestTranscriptChunks } from "@/lib/ingestTranscriptChunks";
 import { checkRateLimit } from "@/lib/rateLimit";
 
 /**
- * CORS helper — allows requests from Chrome extensions and localhost dev.
+ * CORS helper â€” allows requests from Chrome extensions and localhost dev.
  */
 function corsHeaders(req: NextRequest): Record<string, string> {
   const origin = req.headers.get("origin") || "";
@@ -34,7 +34,7 @@ function corsHeaders(req: NextRequest): Record<string, string> {
 }
 
 /**
- * OPTIONS handler — required for CORS preflight from the extension.
+ * OPTIONS handler â€” required for CORS preflight from the extension.
  */
 export async function OPTIONS(req: NextRequest) {
   return new NextResponse(null, {
@@ -208,7 +208,7 @@ export async function POST(req: NextRequest) {
         return;
       }
 
-      // ── Language-aware cache lookup ────────────────────────────────────
+      // â”€â”€ Language-aware cache lookup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // Query for an existing summary matching this exact video + user + language.
       // Each combination is stored separately, so switching languages is a cache miss.
       const langName = LANGUAGE_NAMES[language as OutputLanguage] ?? language;
@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
       });
 
       if (existingSummary) {
-        console.log(`[Cache HIT] videoId=${videoId} language=${language} – returning cached summary`);
+        console.log(`[Cache HIT] videoId=${videoId} language=${language} â€“ returning cached summary`);
         await writeProgress({
           type: "complete",
           summary: {
@@ -256,7 +256,7 @@ export async function POST(req: NextRequest) {
         return;
       }
 
-      console.log(`[Cache MISS] videoId=${videoId} language=${language} – generating fresh summary`);
+      console.log(`[Cache MISS] videoId=${videoId} language=${language} â€“ generating fresh summary`);
 
       // Stage 1: Fetch Transcript
       await writeProgress({
@@ -265,164 +265,154 @@ export async function POST(req: NextRequest) {
         message: "Fetching video transcript...",
       });
 
-      let transcriptResult;
+      let transcriptResult: Array<{text:string;offset:number;duration:number}> | string | undefined;
       let hasTimestamps = true;
 
+      // â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+      // â•‘           3-TIER TRANSCRIPT FALLBACK CHAIN              â•‘
+      // â•‘ Tier 1 â”‚ youtube-transcript library (fast, primary)     â•‘
+      // â•‘ Tier 2 â”‚ ytdl-core caption API (no system tools)        â•‘
+      // â•‘ Tier 3 â”‚ yt-dlp + Groq audio (for no-caption videos)    â•‘
+      // â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+      // â”€â”€ Tier 1 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       try {
-        // Always use the clean videoId — extra URL params (playlist, si=, etc.)
-        // can confuse the youtube-transcript library and cause false failures.
         try {
           transcriptResult = await YoutubeTranscript.fetchTranscript(videoId);
+          console.log("[Transcript] âœ… Tier 1 (youtube-transcript) succeeded");
         } catch {
-          // Retry with explicit English lang — catches most bot-detection false-negatives
           transcriptResult = await YoutubeTranscript.fetchTranscript(videoId, { lang: "en" });
+          console.log("[Transcript] âœ… Tier 1 lang=en retry succeeded");
         }
-      } catch (error) {
-        console.error("Transcript fetch failed (both attempts):", error);
-        console.log("TRIGGERED AUDIO FALLBACK WITH GROQ");
-        
-        await writeProgress({
-          type: "progress",
-          stage: "fetching_transcript",
-          message: "No subtitles found. Transcribing audio track directly...",
-        });
+      } catch (t1Err) {
+        console.warn("[Transcript] âš ï¸ Tier 1 failed:", t1Err instanceof Error ? t1Err.message : t1Err);
+      }
+
+      // â”€â”€ Tier 2: ytdl-core caption timedtext API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // Fetches YouTube's own caption JSON endpoint. No external binaries needed.
+      // Works for any captioned video even when Tier 1 is bot-blocked.
+      if (!transcriptResult) {
+        try {
+          console.log("[Transcript] Trying Tier 2 (ytdl-core caption API)...");
+          await writeProgress({ type: "progress", stage: "fetching_transcript", message: "Fetching captions via alternate method..." });
+
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const ytdl = require("@distube/ytdl-core");
+          const info = await ytdl.getInfo(`https://www.youtube.com/watch?v=${videoId}`);
+
+          type CaptionTrack = { languageCode: string; baseUrl: string; name?: { simpleText: string } };
+          const captionTracks: CaptionTrack[] =
+            info.player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
+
+          if (!captionTracks.length) throw new Error("No caption tracks in metadata");
+
+          const track =
+            captionTracks.find(t => t.languageCode === "en") ||
+            captionTracks.find(t => t.languageCode.startsWith("en")) ||
+            captionTracks[0];
+
+          console.log(`[Transcript] Caption track: lang=${track.languageCode}`);
+
+          const captionRes = await fetch(`${track.baseUrl}&fmt=json3`);
+          if (!captionRes.ok) throw new Error(`Caption HTTP ${captionRes.status}`);
+
+          type CaptionEvent = { tStartMs?: number; dDurationMs?: number; segs?: { utf8: string }[] };
+          const captionData = await captionRes.json() as { events?: CaptionEvent[] };
+
+          const segments = (captionData.events ?? [])
+            .filter(e => Array.isArray(e.segs) && e.segs.length > 0)
+            .map(e => ({
+              text:     (e.segs ?? []).map(s => s.utf8 ?? "").join("").replace(/\n/g, " ").trim(),
+              offset:   e.tStartMs   ?? 0,
+              duration: e.dDurationMs ?? 0,
+            }))
+            .filter(s => s.text.length > 0);
+
+          if (!segments.length) throw new Error("Caption data empty after parsing");
+
+          transcriptResult = segments;
+          hasTimestamps    = true;
+          console.log(`[Transcript] âœ… Tier 2 succeeded â€” ${segments.length} segments`);
+        } catch (t2Err) {
+          console.warn("[Transcript] âš ï¸ Tier 2 failed:", t2Err instanceof Error ? t2Err.message : t2Err);
+        }
+      }
+
+      // â”€â”€ Tier 3: yt-dlp + Groq Whisper (for videos with no captions) â”€â”€â”€â”€
+      if (!transcriptResult) {
+        console.log("[Transcript] Trying Tier 3 (yt-dlp + Groq audio)...");
+        await writeProgress({ type: "progress", stage: "fetching_transcript", message: "No captions found â€” transcribing audio directly..." });
 
         try {
-          // Edge Case 1: Pre-fetch metadata to completely reject Infinite Livestreams natively
           const videoInfoStr = await new Promise<string>((resolve, reject) => {
             const p = spawn("yt-dlp", ["--dump-json", url]);
             let out = "";
             p.stdout.on("data", (d) => (out += d));
-            p.on("close", (code) => (code === 0 ? resolve(out) : reject(new Error("Metadata dump failed"))));
+            p.on("close", (code) => code === 0 ? resolve(out) : reject(new Error("Metadata dump failed")));
             p.on("error", reject);
           });
-          
           const videoInfo = JSON.parse(videoInfoStr);
-          if (videoInfo.is_live) {
-            throw new Error("Cannot summarize active livestreams.");
-          }
-
-          // Edge Case 2: Audio Chunking for strict 25MB Groq cap limits
+          if (videoInfo.is_live) throw new Error("Cannot summarize active livestreams.");
           const durationSeconds = videoInfo.duration || 0;
           let fullTranscript = "";
-          
-          // Path to the ffmpeg binary (ffmpeg-static resolves the correct OS binary)
+
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const ffmpegPath: string = require("ffmpeg-static") as string;
-          const os = require("os");
-          const fs = require("fs");
+          const os   = require("os");
+          const fs   = require("fs");
           const path = require("path");
 
-          await writeProgress({
-            type: "progress",
-            stage: "fetching_transcript",
-            message: "Downloading raw audio track...",
-          });
-
-          // Download entire audio track to temp file (super fast locally, avoids YouTube HTTP range throttling)
+          await writeProgress({ type: "progress", stage: "fetching_transcript", message: "Downloading audio track..." });
           const fullAudioFile = path.join(os.tmpdir(), `full-audio-${Date.now()}.m4a`);
-          
           await new Promise<void>((resolve, reject) => {
-            const ytProcess = spawn("yt-dlp", [
-              "--ffmpeg-location", ffmpegPath,
-              "-f", "bestaudio[ext=m4a]/bestaudio",
-              "--force-overwrites",
-              "-o", fullAudioFile,
-              url
-            ], { stdio: "ignore" });
-            
-            ytProcess.on("close", (c) => c === 0 ? resolve() : reject(new Error(`yt-dlp full download failed (Code ${c})`)));
-            ytProcess.on("error", reject);
+            const p = spawn("yt-dlp", ["--ffmpeg-location", ffmpegPath, "-f", "bestaudio[ext=m4a]/bestaudio", "--force-overwrites", "-o", fullAudioFile, url], { stdio: "ignore" });
+            p.on("close", (c) => c === 0 ? resolve() : reject(new Error(`yt-dlp failed (code ${c})`)));
+            p.on("error", reject);
           });
-          
-          const fileSizeMB = fs.statSync(fullAudioFile).size / (1024 * 1024);
-          
+
+          const fileSizeMB = (fs.statSync(fullAudioFile).size as number) / (1024 * 1024);
+          const transcribeChunk = async (filePath: string) => {
+            const buf = fs.readFileSync(filePath) as Buffer;
+            const file = new File([new Uint8Array(buf)], "audio.m4a", { type: "audio/mp4" });
+            const fd = new FormData();
+            fd.append("file", file); fd.append("model", "whisper-large-v3");
+            const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` }, body: fd });
+            if (!res.ok) throw new Error(`Groq error: ${await res.text()}`);
+            return ((await res.json()) as { text: string }).text;
+          };
+
           if (fileSizeMB < 24) {
-            // Safe to send in one shot
-            const buffer = fs.readFileSync(fullAudioFile);
-            const file = new File([new Uint8Array(buffer)], "audio.m4a", { type: "audio/mp4" });
-            const formData = new FormData();
-            formData.append("file", file);
-            formData.append("model", "whisper-large-v3");
-
-            const groqRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-              method: "POST",
-              headers: { "Authorization": `Bearer ${process.env.GROQ_API_KEY}` },
-              body: formData
-            });
-
-            if (!groqRes.ok) throw new Error(`Groq API Error: ${await groqRes.text()}`);
-            const groqData = await groqRes.json();
-            fullTranscript = groqData.text;
+            fullTranscript = await transcribeChunk(fullAudioFile);
           } else {
-            // Slice locally using ffmpeg directly (disk-to-disk is instant and avoids HTTP timeouts)
-            const CHUNK_DURATION = 1200; // 20 min blocks
-            const chunksNeeded = Math.ceil(durationSeconds / CHUNK_DURATION) || 1;
-            
-            for (let i = 0; i < chunksNeeded; i++) {
+            const CHUNK = 1200;
+            const n = Math.ceil(durationSeconds / CHUNK) || 1;
+            for (let i = 0; i < n; i++) {
               const chunkFile = path.join(os.tmpdir(), `chunk-${Date.now()}-${i}.m4a`);
-              const startSec = i * CHUNK_DURATION;
-              
-              await writeProgress({
-                type: "progress",
-                stage: "fetching_transcript",
-                message: `Transcribing audio chunk ${i + 1} of ${chunksNeeded}...`,
-              });
-              
+              await writeProgress({ type: "progress", stage: "fetching_transcript", message: `Transcribing audio chunk ${i + 1}/${n}...` });
               await new Promise<void>((resolve, reject) => {
-                const ffProcess = spawn(ffmpegPath, [
-                  "-i", fullAudioFile,
-                  "-ss", startSec.toString(),
-                  "-t", CHUNK_DURATION.toString(),
-                  "-c", "copy",
-                  chunkFile
-                ], { stdio: "ignore" });
-                ffProcess.on("close", (c) => c === 0 ? resolve() : reject(new Error(`ffmpeg slice failed (Code ${c})`)));
-                ffProcess.on("error", reject);
+                const ff = spawn(ffmpegPath, ["-i", fullAudioFile, "-ss", (i * CHUNK).toString(), "-t", CHUNK.toString(), "-c", "copy", chunkFile], { stdio: "ignore" });
+                ff.on("close", (c) => c === 0 ? resolve() : reject(new Error(`ffmpeg failed (code ${c})`)));
+                ff.on("error", reject);
               });
-              
-              const buffer = fs.readFileSync(chunkFile);
-              try { fs.unlinkSync(chunkFile); } catch(e){}
-              
-              const file = new File([new Uint8Array(buffer)], "audio.m4a", { type: "audio/mp4" });
-              const formData = new FormData();
-              formData.append("file", file);
-              formData.append("model", "whisper-large-v3");
-
-              const groqRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-                method: "POST",
-                headers: { "Authorization": `Bearer ${process.env.GROQ_API_KEY}` },
-                body: formData
-              });
-
-              if (!groqRes.ok) throw new Error(`Groq Chunk API Error: ${await groqRes.text()}`);
-              const groqData = await groqRes.json();
-              fullTranscript += " " + groqData.text;
+              fullTranscript += " " + await transcribeChunk(chunkFile);
+              try { fs.unlinkSync(chunkFile); } catch { /* ignore */ }
             }
           }
-          
-          // Final local cleanup
-          try { fs.unlinkSync(fullAudioFile); } catch(cleanupErr) {}
+          try { fs.unlinkSync(fullAudioFile); } catch { /* ignore */ }
+          transcriptResult = fullTranscript.trim();
+          hasTimestamps    = false;
+          console.log("[Transcript] âœ… Tier 3 (yt-dlp + Groq) succeeded");
 
-          transcriptResult = fullTranscript.trim(); 
-          hasTimestamps = false;            
-          
-        } catch (fallbackError) {
-          const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-          console.error("Audio fallback failed:", fallbackMsg);
-
-          // Distinguish system/install errors from actual missing transcript.
-          // ENOENT → yt-dlp isn't installed. Network/auth → transient failure.
-          // In both cases the user should RETRY, not be told "no transcript exists".
-          const isSystemError = fallbackMsg.includes("ENOENT") || fallbackMsg.includes("yt-dlp");
-          const userMessage = isSystemError
-            ? "Couldn't fetch this video's transcript — please try again in a moment."
-            : "No captions or audio track could be found for this video.";
-
+        } catch (t3Err) {
+          const t3msg = t3Err instanceof Error ? t3Err.message : String(t3Err);
+          console.error("[Transcript] âŒ All tiers failed. Tier 3:", t3msg);
+          const isToolMissing = t3msg.includes("ENOENT") || t3msg.includes("yt-dlp");
           await writeProgress({
             type: "error",
-            error: userMessage,
-            details: `Fallback failure: ${fallbackMsg}`,
+            error: isToolMissing
+              ? "Couldn't fetch this video's transcript â€” please try again in a moment."
+              : "No captions or audio track could be found for this video.",
+            details: t3msg,
           });
           await writer.close();
           return;
@@ -432,7 +422,7 @@ export async function POST(req: NextRequest) {
       // Map over the array objects to match chunkTranscript expectations
       const transcriptContent = transcriptResult;
 
-      // ── Guard: some videos return null/empty content ─────────────────
+      // â”€â”€ Guard: some videos return null/empty content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (
         transcriptContent == null ||
         (Array.isArray(transcriptContent) && transcriptContent.length === 0) ||
@@ -536,9 +526,9 @@ export async function POST(req: NextRequest) {
           }))
         : [];
 
-      // Save to database — upsert keyed on (videoId, userId, language) so each
+      // Save to database â€” upsert keyed on (videoId, userId, language) so each
       // language gets its own row and switching languages never overwrites another.
-      console.log(`[Cache MISS] Saving summary — videoId=${videoId} language=${language}`);
+      console.log(`[Cache MISS] Saving summary â€” videoId=${videoId} language=${language}`);
       const savedSummary = await prisma.summary.upsert({
         where: {
           videoId_userId_language: { videoId, userId, language },
@@ -620,9 +610,9 @@ export async function POST(req: NextRequest) {
         status: "completed",
       });
 
-      // ── RAG Ingestion (Phase 2) ──────────────────────────────────────────
+      // â”€â”€ RAG Ingestion (Phase 2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       // Fire-and-forget: run AFTER the SSE "complete" event is written so the
-      // user already has their summary. Any failure here is logged only —
+      // user already has their summary. Any failure here is logged only â€”
       // it must NEVER surface to the user or break the summarize flow.
       ingestTranscriptChunks({
         summaryId:  savedSummary.id,
@@ -630,7 +620,7 @@ export async function POST(req: NextRequest) {
         userId,
         transcript: transcriptText,
       }).catch((err) =>
-        console.error("[RAG] Background ingestion failed — will retry next summarise:", err)
+        console.error("[RAG] Background ingestion failed â€” will retry next summarise:", err)
       );
     } catch (error) {
       console.error("Summarize error:", error);
@@ -790,7 +780,7 @@ function buildChapterBasedPrompt(
     : `- Include ${config.bulletPointsPerChapter} detailed bullet points per chapter`;
 
   const transitionInstruction = config.showTransitions
-    ? `- Add a transition note (→ *Connection to next chapter: [explanation]*) showing how each chapter leads to the next`
+    ? `- Add a transition note (â†’ *Connection to next chapter: [explanation]*) showing how each chapter leads to the next`
     : "";
 
   const chapterScopeInstruction = config.topChaptersOnly
@@ -802,7 +792,7 @@ function buildChapterBasedPrompt(
     ? ` [(0:00)](https://youtube.com/watch?v=${videoId}&t=0s)`
     : ``;
   const timeRule = hasTimestamps
-    ? `\n- CRITICAL: Each chapter heading and each recommended chapter MUST include a real clickable timestamp link in this EXACT format: [(M:SS)](https://youtube.com/watch?v=${videoId}&t=Xs) where you replace M:SS with the actual chapter start time and X with the actual total seconds. For example: [(2:15)](https://youtube.com/watch?v=${videoId}&t=135s). NEVER write the word "Timestamp" or "XXs" — those are WRONG. Always use real numbers from the transcript timestamps.`
+    ? `\n- CRITICAL: Each chapter heading and each recommended chapter MUST include a real clickable timestamp link in this EXACT format: [(M:SS)](https://youtube.com/watch?v=${videoId}&t=Xs) where you replace M:SS with the actual chapter start time and X with the actual total seconds. For example: [(2:15)](https://youtube.com/watch?v=${videoId}&t=135s). NEVER write the word "Timestamp" or "XXs" â€” those are WRONG. Always use real numbers from the transcript timestamps.`
     : ``;
 
   return `Analyze this video transcript and create a ${config.description} chapter-based summary.
