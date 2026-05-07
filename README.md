@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/aryan2022-bit/Brieflytube-AI/main/extension/icons/icon128.png" alt="Brieflytube AI Logo" width="90" />
+<img src="https://raw.githubusercontent.com/aryan2022-bit/Briefytube-AI/main/extension/icons/icon128.png" alt="Briefytube AI Logo" width="90" />
 
-# Brieflytube AI
+# Briefytube AI
 
 **AI-powered YouTube summarization + RAG chat — in your browser, in your language.**
 
@@ -16,9 +16,9 @@
 
 ---
 
-## ✨ What is Brieflytube AI?
+## ✨ What is Briefytube AI?
 
-Brieflytube AI turns any YouTube video into a structured, timestamped summary and lets you **chat with the video's transcript** using a RAG (Retrieval-Augmented Generation) pipeline — all for free.
+Briefytube AI turns any YouTube video into a structured, timestamped summary and lets you **chat with the video's transcript** using a RAG (Retrieval-Augmented Generation) pipeline — all for free.
 
 It ships as two surfaces:
 
@@ -213,7 +213,7 @@ POST /api/chat { message, videoId }
 ## 📁 Project Structure
 
 ```
-brieflytube-ai/
+Briefytube-ai/
 ├── app/                        # Next.js App Router
 │   ├── api/
 │   │   ├── summarize/route.ts  # Core SSE summarization + cache
@@ -285,8 +285,8 @@ TranscriptChunk (
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/aryan2022-bit/Brieflytube-AI.git
-cd Brieflytube-AI
+git clone https://github.com/aryan2022-bit/Briefytube-AI.git
+cd Briefytube-AI
 npm install --legacy-peer-deps
 ```
 
@@ -335,7 +335,7 @@ npm run dev
 1. Open `chrome://extensions`
 2. Enable **Developer Mode**
 3. Click **Load unpacked** → select the `extension/` folder
-4. Open any YouTube video → click the Brieflytube AI side panel icon
+4. Open any YouTube video → click the Briefytube AI side panel icon
 
 ---
 
